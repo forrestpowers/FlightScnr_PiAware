@@ -31,17 +31,27 @@ def tick_sweep():
 
 def _draw_grid(surface):
     center = (theme.CENTER_X, theme.CENTER_Y)
+    line_w = max(1, theme.s(2))
     for ring in range(1, theme.RING_COUNT + 1):
         r = theme.GRID_OUTER_RADIUS * ring // theme.RING_COUNT
-        draw.draw_dashed_circle(surface, center, r, theme.GRID, width=max(1, theme.s(2)))
+        draw.draw_dashed_circle(surface, center, r, theme.GRID, width=line_w)
+
+    cx, cy = theme.CENTER_X, theme.CENTER_Y
+    r = theme.GRID_OUTER_RADIUS
+    draw.draw_dashed_line(surface, (cx - r, cy), (cx + r, cy), theme.CROSSHAIR, width=line_w)
+    draw.draw_dashed_line(surface, (cx, cy - r), (cx, cy + r), theme.CROSSHAIR, width=line_w)
 
     if settings.show_compass_rose():
         font = draw.load_font(theme.FONT_CARDINAL, bold=True)
+        north_y = theme.CENTER_Y - theme.VISIBLE_RADIUS + theme.CARDINAL_NORTH_OFFSET_Y
+        south_y = theme.CENTER_Y + theme.VISIBLE_RADIUS - theme.CARDINAL_SOUTH_OFFSET_Y - font.get_height()
+        west_x = theme.CENTER_X - theme.VISIBLE_RADIUS + theme.s(10)
+        east_x = theme.CENTER_X + theme.VISIBLE_RADIUS - theme.s(10) - font.size("E")[0]
         labels = [
-            ("N", theme.CENTER_X, theme.CARDINAL_NORTH_OFFSET_Y),
-            ("S", theme.CENTER_X, theme.SIZE - theme.CARDINAL_SOUTH_OFFSET_Y - font.get_height()),
-            ("W", theme.s(10), theme.CENTER_Y - font.get_height() // 2),
-            ("E", theme.SIZE - theme.s(10) - font.size("E")[0], theme.CENTER_Y - font.get_height() // 2),
+            ("N", theme.CENTER_X, north_y),
+            ("S", theme.CENTER_X, south_y),
+            ("W", west_x, theme.CENTER_Y - font.get_height() // 2),
+            ("E", east_x, theme.CENTER_Y - font.get_height() // 2),
         ]
         for text, x, y in labels:
             rendered = font.render(text, True, theme.LABEL)
@@ -92,10 +102,10 @@ def _draw_aircraft_tag(surface, x, y, flight):
     symbol_half = theme.AIRCRAFT_ICON_RADIUS
 
     if tag_on_right:
-        anchor_x = min(x + symbol_half + theme.AIRCRAFT_LABEL_GAP, theme.SIZE - 200)
+        anchor_x = min(x + symbol_half + theme.AIRCRAFT_LABEL_GAP, theme.CENTER_X + theme.VISIBLE_RADIUS - theme.s(20))
         align = "left"
     else:
-        anchor_x = max(x - symbol_half - theme.AIRCRAFT_LABEL_GAP, 200)
+        anchor_x = max(x - symbol_half - theme.AIRCRAFT_LABEL_GAP, theme.CENTER_X - theme.VISIBLE_RADIUS + theme.s(20))
         align = "right"
 
     lines = [
@@ -147,39 +157,42 @@ def _draw_status(surface, flights):
     try:
         from config import location_configured, location_status
     except ImportError:
-        return
+        location_configured = lambda: False
+        location_status = lambda: ""
 
     font = draw.load_font(theme.FONT_DETAIL)
+    scale_tag = scale.format_active_tag(settings.distance_in_miles())
+    y = theme.CENTER_Y - int(theme.VISIBLE_RADIUS * 0.62)
+
+    visible = _visible_flights(flights)
+    if visible:
+        header = f"{scale_tag}  ·  {len(visible)} aircraft"
+        color = theme.SWEEP
+    elif not location_configured():
+        header = f"{scale_tag}  ·  no location"
+        color = theme.TAG_ALT_DESCEND
+    else:
+        header = f"{scale_tag}  ·  no aircraft"
+        color = theme.HINT
+
+    draw.draw_center_line(surface, header, y, font, color)
+
     if not location_configured():
         lines = [
-            "No location configured",
             "Set HOME_LAT & HOME_LON",
             "in /etc/plane-tracker.env",
         ]
         color = theme.TAG_ALT_DESCEND
-    visible = _visible_flights(flights)
-    if not visible:
+    elif not visible:
         try:
-            from config import MIN_HEIGHT
-            min_line = f"Min height: {MIN_HEIGHT} ft" if MIN_HEIGHT else ""
+            min_line = f"Min height: {settings.min_height_ft()} ft"
         except ImportError:
             min_line = ""
-        lines = [
-            location_status(),
-            "No aircraft in range",
-        ]
+        lines = [location_status(), "Waiting for ADS-B / FR24…"]
         if min_line:
-            lines.append(min_line)
-        else:
-            lines.append("Waiting for ADS-B / FR24…")
+            lines.insert(1, min_line)
         color = theme.HINT
     else:
-        lines = [f"{len(visible)} aircraft"]
-        color = theme.SWEEP
-        y = theme.s(20)
-        for line in lines:
-            rendered = font.render(line, True, color)
-            surface.blit(rendered, rendered.get_rect(midtop=(theme.CENTER_X, y)))
         return
 
     y = theme.CENTER_Y - theme.s(30)
@@ -198,27 +211,85 @@ def draw_radar(surface, flights, full_redraw=True):
 
     _draw_flights(surface, flights)
     draw.draw_sweep_line(surface, _sweep_angle, theme.SWEEP, width=max(2, theme.s(2)))
-
-    tag_font = draw.load_font(theme.FONT_DETAIL)
-    scale_label = scale.format_active_tag(settings.distance_in_miles())
-    tag = tag_font.render(scale_label, True, theme.SWEEP)
-    surface.blit(tag, tag.get_rect(bottomright=(theme.SIZE - theme.s(16), theme.SIZE - theme.s(12))))
     _draw_status(surface, flights)
 
 
-def pick_flight_at(flights, tap_x, tap_y):
+def range_header_rect() -> pygame.Rect:
+    """Tap target for the range readout at the top of the round dial."""
+    font = draw.load_font(theme.FONT_DETAIL)
+    row_h = font.get_height()
+    y = theme.CENTER_Y - int(theme.VISIBLE_RADIUS * 0.62)
+    half_w = draw.circle_half_width_at_row(y, row_h * 2 + theme.s(8))
+    height = row_h * 2 + theme.s(12)
+    return pygame.Rect(theme.CENTER_X - half_w, y, half_w * 2, height)
+
+
+def tap_on_range_header(x: int, y: int) -> bool:
+    return range_header_rect().collidepoint(x, y)
+
+
+def _flight_screen_xy(flight) -> tuple[int, int] | None:
+    lat = flight.get("plane_latitude")
+    lon = flight.get("plane_longitude")
+    if lat is None or lon is None:
+        return None
+    _, _, dist_km = geo.local_offset_km(lat, lon)
+    if dist_km <= geo.inner_ring_max_km():
+        return geo.lat_lon_to_screen(lat, lon)
+    return geo.beyond_ring_position(lat, lon)
+
+
+def _aircraft_tag_rect(x: int, y: int) -> pygame.Rect:
+    tag_font = draw.load_font(theme.FONT_TAG, bold=True)
+    line_h = tag_font.get_height()
+    block_h = line_h * 3
+    ly = y - block_h // 2
+    symbol_half = theme.AIRCRAFT_ICON_RADIUS + theme.s(12)
+    if x < theme.CENTER_X:
+        anchor_x = min(
+            x + symbol_half + theme.AIRCRAFT_LABEL_GAP,
+            theme.CENTER_X + theme.VISIBLE_RADIUS - theme.s(20),
+        )
+        width = theme.CENTER_X + theme.VISIBLE_RADIUS - anchor_x - theme.s(4)
+        return pygame.Rect(anchor_x, ly, max(theme.s(48), width), block_h)
+    anchor_x = max(
+        x - symbol_half - theme.AIRCRAFT_LABEL_GAP,
+        theme.CENTER_X - theme.VISIBLE_RADIUS + theme.s(20),
+    )
+    width = anchor_x - (theme.CENTER_X - theme.VISIBLE_RADIUS) + theme.s(4)
+    return pygame.Rect(anchor_x - max(theme.s(48), width), ly, max(theme.s(48), width), block_h)
+
+
+def pick_flight_at(flights, tap_x, tap_y, alt_x=None, alt_y=None):
+    points = [(tap_x, tap_y)]
+    if alt_x is not None and alt_y is not None:
+        points.append((alt_x, alt_y))
+
     best = None
-    best_d2 = theme.TAP_PICK_RADIUS ** 2
+    best_d2 = None
     for flight in _visible_flights(flights):
+        pos = _flight_screen_xy(flight)
+        if not pos:
+            continue
+        x, y = pos
         lat = flight.get("plane_latitude")
         lon = flight.get("plane_longitude")
-        if lat is None or lon is None:
-            continue
-        x, y = geo.lat_lon_to_screen(lat, lon)
-        d2 = (x - tap_x) ** 2 + (y - tap_y) ** 2
-        if d2 < best_d2:
-            best_d2 = d2
-            best = flight
+        _, _, dist_km = geo.local_offset_km(lat, lon)
+        compact = dist_km > geo.inner_ring_max_km()
+        hit_r = theme.TAP_PICK_RADIUS if compact else max(theme.TAP_PICK_RADIUS, theme.s(52))
+        hit_r2 = hit_r * hit_r
+        tag_rect = None if compact else _aircraft_tag_rect(x, y)
+
+        for px, py in points:
+            d2 = (x - px) ** 2 + (y - py) ** 2
+            hit = d2 <= hit_r2
+            if not hit and tag_rect is not None:
+                hit = tag_rect.collidepoint(px, py)
+                if hit:
+                    d2 = d2 // 2
+            if hit and (best_d2 is None or d2 < best_d2):
+                best = flight
+                best_d2 = d2
     return best
 
 

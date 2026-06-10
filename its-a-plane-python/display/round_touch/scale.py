@@ -33,6 +33,12 @@ def decrease():
         _active_index -= 1
 
 
+def cycle_next():
+    """Advance to the next range band, wrapping to the smallest."""
+    global _active_index
+    _active_index = (_active_index + 1) % len(SCALE_BANDS)
+
+
 def select(index: int):
     global _active_index
     _active_index = max(0, min(index, len(SCALE_BANDS) - 1))
@@ -53,12 +59,17 @@ def format_active_tag(use_miles: bool) -> str:
     return format_scale_tag(active_band()["label_km"], use_miles)
 
 
-def select_for_radius_nm(radius_nm: float):
-    """Pick the widest scale band that fits the configured search radius."""
+def index_for_radius_nm(radius_nm: float) -> int:
+    """Scale band index that fits the configured search radius."""
     radius_km = radius_nm * 1.852
     best = len(SCALE_BANDS) - 1
     for i, band in enumerate(SCALE_BANDS):
         if band["coverage_km"] >= radius_km:
             best = i
             break
-    select(best)
+    return best
+
+
+def select_for_radius_nm(radius_nm: float):
+    """Pick the widest scale band that fits the configured search radius."""
+    select(index_for_radius_nm(radius_nm))

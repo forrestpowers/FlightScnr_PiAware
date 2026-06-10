@@ -54,10 +54,11 @@ echo ""
 # --- Step 1b: Extract airline logos from logo.zip ---
 if [ -f "$REPO_DIR/logo.zip" ]; then
     echo "==> Extracting logos from logo.zip..."
-    mkdir -p "$REPO_DIR/its-a-plane-python/logos"
-    unzip -qo "$REPO_DIR/logo.zip" -d "$REPO_DIR/its-a-plane-python/logos"
-    chmod -R a+r "$REPO_DIR/its-a-plane-python/logos"
-    echo "   ✓ Logos extracted and permissions set"
+    unzip -qo "$REPO_DIR/logo.zip" -d "$REPO_DIR"
+    chmod -R a+r "$REPO_DIR/logo"
+    rm -f "$REPO_DIR/its-a-plane-python/logos"
+    ln -sfn ../logo "$REPO_DIR/its-a-plane-python/logos"
+    echo "   ✓ Logos extracted to logo/ and linked as its-a-plane-python/logos"
 else
     echo "   ⚠ logo.zip not found in $REPO_DIR, skipping logo extraction"
 fi

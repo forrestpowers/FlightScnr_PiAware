@@ -27,15 +27,15 @@ Install dependencies (`pygame` is included in `requirements.txt`), then start as
 sudo systemctl restart plane-tracker
 ```
 
-### Screens & navigation
+### Screens & navigation (touch only — tap and one-finger swipe)
 
 | Screen | How to open | Gestures |
 |--------|-------------|----------|
-| **Radar** (home) | Boot splash → radar | Tap aircraft → flight detail; scroll → zoom range |
+| **Radar** (home) | Boot splash → radar | Tap aircraft → flight detail; **tap range label (top)** → cycle zoom |
 | **Clock** | Swipe down from radar | Swipe up → radar |
 | **About** | Swipe up from radar | Swipe down → radar |
-| **Settings** | Swipe left from radar | Swipe through Main → Display → Colors |
-| **Flight detail** | Tap aircraft on radar | Scroll to cycle flights; swipe right → radar |
+| **Settings** | Swipe left from radar | Swipe left/right between pages; on Display page tap to select row, swipe up/down to adjust |
+| **Flight detail** | Tap aircraft on radar | Swipe up/down/left or tap → cycle flights; swipe right → radar |
 
 Visual design uses the FlightScnr palette: dark green background, green radar grid, animated sweep, amber aircraft icons, and cyan/magenta altitude tags.
 

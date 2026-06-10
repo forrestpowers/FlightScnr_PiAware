@@ -44,7 +44,7 @@ def beyond_ring_position(lat: float, lon: float):
     dx_km, dy_km, dist_km = local_offset_km(lat, lon)
     if dist_km < 0.01 or dist_km <= inner_ring_max_km():
         return None
-    rim_r = theme.CENTER_X - theme.BEYOND_RING_MARGIN
+    rim_r = theme.VISIBLE_RADIUS - theme.BEYOND_RING_MARGIN
     angle = math.atan2(dx_km, dy_km)
     x = theme.CENTER_X + int(round(math.sin(angle) * rim_r))
     y = theme.CENTER_Y - int(round(math.cos(angle) * rim_r))

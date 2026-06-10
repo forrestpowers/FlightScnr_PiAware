@@ -7,8 +7,8 @@ import time
 import pygame
 
 from utilities.overhead import Overhead
-from display.round_touch import draw, input_handler, scale, settings, theme, video
-from display.round_touch.screens import clock, details, flight_detail, info, radar
+from display.round_touch import draw, input_handler, nav, scale, settings, theme, video
+from display.round_touch.screens import clock, details, flight_detail, info, radar, tracked
 
 logger = logging.getLogger("plane-tracker.display")
 
@@ -17,6 +17,7 @@ SCREEN_FLIGHT = "flight_detail"
 SCREEN_SETTINGS = "settings"
 SCREEN_DETAILS = "details"
 SCREEN_CLOCK = "clock"
+SCREEN_TRACKED = "tracked"
 
 SECONDARY_TIMEOUT_S = 45
 BOOT_SPLASH_S = 3
@@ -36,19 +37,8 @@ class RoundTouchDisplay:
             None
         )  # allow all; we filter QUIT manually
 
-        try:
-            from config import SEARCH_RADIUS_NM
-            scale.select_for_radius_nm(SEARCH_RADIUS_NM)
-        except ImportError:
-            scale.select(settings.scale_index())
-        try:
-            from config import DISTANCE_UNITS
-            if DISTANCE_UNITS == "imperial" and not settings.distance_in_miles():
-                settings.toggle_distance_units()
-            elif DISTANCE_UNITS == "metric" and settings.distance_in_miles():
-                settings.toggle_distance_units()
-        except ImportError:
-            pass
+        scale.select(settings.scale_index())
+        settings.apply_theme_colors()
 
         self.overhead = Overhead()
         self.overhead.grab_data()
@@ -65,6 +55,8 @@ class RoundTouchDisplay:
         self._last_static_draw = 0
         self._display_focus = 0
         self._fatal_error = None
+        self._scroll = nav.ScrollState()
+        self._last_tracked_data = None
 
         radar._init_sweep()
         self._safe_draw()
@@ -83,24 +75,41 @@ class RoundTouchDisplay:
     def _draw(self):
         if self._fatal_error:
             draw.draw_error(self.surface, self._fatal_error)
+            draw.apply_round_bezel(self.surface)
             pygame.display.flip()
             return
 
         if time.time() < self._boot_until:
             details.draw_details(self.surface, boot_splash=True)
+            draw.apply_round_bezel(self.surface)
             pygame.display.flip()
             return
 
         if self.screen == SCREEN_RADAR:
             radar.draw_radar(self.surface, self.flights)
         elif self.screen == SCREEN_FLIGHT:
-            flight_detail.draw_flight_detail(self.surface, self._ordered_flights(), self.flight_index)
+            self._scroll.max_offset = flight_detail.draw_flight_detail(
+                self.surface, self._ordered_flights(), self.flight_index, self._scroll.offset
+            )
         elif self.screen == SCREEN_SETTINGS:
-            info.draw_info(self.surface, self.settings_page)
+            self._scroll.max_offset = info.draw_info(
+                self.surface,
+                self.settings_page,
+                self._scroll.offset,
+                self._display_focus,
+            )
         elif self.screen == SCREEN_DETAILS:
-            details.draw_details(self.surface)
+            self._scroll.max_offset = details.draw_details(self.surface, scroll_offset=self._scroll.offset)
         elif self.screen == SCREEN_CLOCK:
             clock.draw_clock(self.surface)
+        elif self.screen == SCREEN_TRACKED:
+            self._scroll.max_offset = tracked.draw_tracked(
+                self.surface,
+                self.overhead.tracked_data,
+                scroll_offset=self._scroll.offset,
+            )
+        self._scroll.clamp()
+        draw.apply_round_bezel(self.surface)
         pygame.display.flip()
 
     def _safe_draw(self):
@@ -111,6 +120,7 @@ class RoundTouchDisplay:
             logger.exception("Display draw failed")
             try:
                 draw.draw_error(self.surface, self._fatal_error)
+                draw.apply_round_bezel(self.surface)
                 pygame.display.flip()
             except Exception:
                 logger.exception("Could not render error screen")
@@ -119,36 +129,141 @@ class RoundTouchDisplay:
         self._secondary_activity = time.time()
 
     def _return_to_radar(self):
+        self._fatal_error = None
         self.screen = SCREEN_RADAR
         self.settings_page = info.PAGE_MAIN
+        self._scroll.reset()
 
-    def _handle_settings_knob(self, delta: int):
-        if self.settings_page != info.PAGE_DISPLAY:
-            return
-        if self._display_focus == 0:
-            settings.set_brightness_percent(settings.brightness_percent() + delta * 5)
-        elif self._display_focus == 1 and delta != 0:
+    def _set_settings_page(self, page: int):
+        if page != self.settings_page:
+            self._scroll.reset()
+            if page != info.PAGE_DISPLAY:
+                self._display_focus = 0
+        self.settings_page = page
+
+    def _open_screen(self, screen: str):
+        if screen != self.screen:
+            self._scroll.reset()
+        self.screen = screen
+
+    def _apply_display_row(self, row: int):
+        self._display_focus = row
+        if row == 0:
+            pct = settings.brightness_percent() + 5
+            if pct > 100:
+                pct = 10
+            settings.set_brightness_percent(pct)
+        elif row == 1:
             settings.toggle_distance_units()
-        elif self._display_focus == 2 and delta != 0:
+        elif row == 2:
             settings.toggle_compass_rose()
+        elif row == 3:
+            settings.cycle_min_height()
+        elif row == 4:
+            settings.cycle_tracked_stats_mode()
+            self._scroll.reset()
 
-    def _handle_settings_tap(self):
-        if self.settings_page == info.PAGE_DISPLAY:
-            self._display_focus = (self._display_focus + 1) % 3
+    def _open_flight_at(self, x: int, y: int, alt_x: int | None = None, alt_y: int | None = None) -> bool:
+        picked = radar.pick_flight_at(self.flights, x, y, alt_x, alt_y)
+        ordered = self._ordered_flights()
+        if not picked or not ordered:
+            return False
+        try:
+            self.flight_index = ordered.index(picked)
+        except ValueError:
+            self.flight_index = 0
+        self._open_screen(SCREEN_FLIGHT)
+        self._note_activity()
+        return True
+
+    def _apply_scroll_delta(self, delta: int):
+        if not delta:
+            return
+        self._scroll.step(delta)
+        self._note_activity()
+        self._safe_draw()
+
+    def _handle_scroll_drag(self):
+        dy = self.input.consume_scroll_drag()
+        if not dy:
+            return
+        if self.screen == SCREEN_TRACKED and settings.tracked_stats_mode() == settings.TRACKED_STATS_SCROLL:
+            self._apply_scroll_delta(-dy)
+        elif self.screen == SCREEN_FLIGHT:
+            self._apply_scroll_delta(-dy)
+        elif self.screen == SCREEN_DETAILS:
+            self._apply_scroll_delta(-dy)
+        elif self.screen == SCREEN_SETTINGS and self.settings_page in (
+            info.PAGE_MAIN,
+            info.PAGE_COLORS,
+        ):
+            self._apply_scroll_delta(-dy)
+
+    def _handle_settings_tap(self, x: int | None = None, y: int | None = None):
+        if self.settings_page == info.PAGE_DISPLAY and x is not None and y is not None:
+            row = info.display_row_at(x, y)
+            if row is not None:
+                self._apply_display_row(row)
+        elif self.settings_page == info.PAGE_COLORS and x is not None and y is not None:
+            row = info.theme_row_at(x, y, self._scroll.offset)
+            if row is not None:
+                settings.set_theme_index(row)
 
     def _handle_navigation(self):
-        swipe = self.input.consume_swipe()
         if time.time() < self._boot_until:
             return
+
+        self._handle_scroll_drag()
+
+        gesture = self.input.consume_gesture()
+        if self._fatal_error and gesture:
+            kind = gesture[0]
+            if kind == "swipe" or kind == "tap":
+                self._return_to_radar()
+                self._safe_draw()
+                return
+        swipe = input_handler.SWIPE_NONE
+        swipe_end = None
+        swipe_start = None
+        tap = None
+        if gesture:
+            kind = gesture[0]
+            if kind == "swipe":
+                swipe = gesture[1]
+                swipe_end = gesture[2] if len(gesture) > 2 else None
+                swipe_start = gesture[3] if len(gesture) > 3 else None
+            else:
+                tap = gesture[1]
 
         if swipe != input_handler.SWIPE_NONE and self.screen not in (SCREEN_RADAR, SCREEN_CLOCK):
             self._note_activity()
 
-        if swipe == input_handler.SWIPE_DOWN and self.screen == SCREEN_RADAR:
-            self.screen = SCREEN_CLOCK
+        # Tracked sits left of radar: swipe right on radar opens it; swipe left returns.
+        if swipe == input_handler.SWIPE_RIGHT and self.screen == SCREEN_RADAR:
+            opened = False
+            if swipe_end:
+                opened = self._open_flight_at(swipe_end[0], swipe_end[1])
+            if not opened and swipe_start and swipe_end:
+                opened = self._open_flight_at(
+                    swipe_start[0], swipe_start[1], swipe_end[0], swipe_end[1],
+                )
+            elif not opened and swipe_start:
+                opened = self._open_flight_at(swipe_start[0], swipe_start[1])
+            if opened:
+                self._safe_draw()
+            else:
+                self._open_screen(SCREEN_TRACKED)
+                self._scroll.reset()
+                self._note_activity()
+                self._safe_draw()
+        elif swipe == input_handler.SWIPE_LEFT and self.screen == SCREEN_TRACKED:
+            self._return_to_radar()
+            self._safe_draw()
+        elif swipe == input_handler.SWIPE_DOWN and self.screen == SCREEN_RADAR:
+            self._open_screen(SCREEN_CLOCK)
             self._safe_draw()
         elif swipe == input_handler.SWIPE_UP and self.screen == SCREEN_RADAR:
-            self.screen = SCREEN_DETAILS
+            self._open_screen(SCREEN_DETAILS)
             self._note_activity()
             self._safe_draw()
         elif swipe == input_handler.SWIPE_DOWN and self.screen == SCREEN_DETAILS:
@@ -158,67 +273,100 @@ class RoundTouchDisplay:
             self._return_to_radar()
             self._safe_draw()
         elif swipe == input_handler.SWIPE_LEFT and self.screen == SCREEN_RADAR:
-            self.screen = SCREEN_SETTINGS
+            self._open_screen(SCREEN_SETTINGS)
             self.settings_page = info.PAGE_MAIN
             self._note_activity()
             self._safe_draw()
         elif swipe == input_handler.SWIPE_LEFT and self.screen == SCREEN_SETTINGS and self.settings_page == info.PAGE_MAIN:
-            self.settings_page = info.PAGE_DISPLAY
+            self._set_settings_page(info.PAGE_DISPLAY)
             self._safe_draw()
         elif swipe == input_handler.SWIPE_LEFT and self.screen == SCREEN_SETTINGS and self.settings_page == info.PAGE_DISPLAY:
-            self.settings_page = info.PAGE_COLORS
+            self._set_settings_page(info.PAGE_COLORS)
             self._safe_draw()
-        elif swipe == input_handler.SWIPE_RIGHT and self.screen == SCREEN_FLIGHT:
+        elif self.screen == SCREEN_FLIGHT and swipe == input_handler.SWIPE_LEFT:
+            ordered = self._ordered_flights()
+            if ordered:
+                self.flight_index = (self.flight_index + 1) % len(ordered)
+                self._scroll.reset()
+                self._note_activity()
+                self._safe_draw()
+        elif self.screen == SCREEN_FLIGHT and swipe == input_handler.SWIPE_RIGHT:
             self._return_to_radar()
             self._safe_draw()
+        elif self.screen == SCREEN_FLIGHT and swipe in (input_handler.SWIPE_UP, input_handler.SWIPE_DOWN):
+            delta = -nav.scroll_step() if swipe == input_handler.SWIPE_UP else nav.scroll_step()
+            self._scroll.step(delta)
+            self._safe_draw()
         elif swipe == input_handler.SWIPE_RIGHT and self.screen == SCREEN_SETTINGS and self.settings_page == info.PAGE_COLORS:
-            self.settings_page = info.PAGE_DISPLAY
+            self._set_settings_page(info.PAGE_DISPLAY)
             self._safe_draw()
         elif swipe == input_handler.SWIPE_RIGHT and self.screen == SCREEN_SETTINGS and self.settings_page == info.PAGE_DISPLAY:
-            self.settings_page = info.PAGE_MAIN
+            self._set_settings_page(info.PAGE_MAIN)
             self._safe_draw()
         elif swipe == input_handler.SWIPE_RIGHT and self.screen == SCREEN_SETTINGS:
             self._return_to_radar()
             self._safe_draw()
+        elif swipe in (input_handler.SWIPE_UP, input_handler.SWIPE_DOWN) and self.screen == SCREEN_DETAILS:
+            delta = -nav.scroll_step() if swipe == input_handler.SWIPE_UP else nav.scroll_step()
+            self._scroll.step(delta)
+            self._safe_draw()
+        elif (
+            swipe in (input_handler.SWIPE_UP, input_handler.SWIPE_DOWN)
+            and self.screen == SCREEN_TRACKED
+            and settings.tracked_stats_mode() == settings.TRACKED_STATS_SCROLL
+        ):
+            delta = -nav.scroll_step() if swipe == input_handler.SWIPE_UP else nav.scroll_step()
+            self._apply_scroll_delta(delta)
+        elif swipe in (input_handler.SWIPE_UP, input_handler.SWIPE_DOWN) and self.screen == SCREEN_SETTINGS and self.settings_page in (
+            info.PAGE_MAIN,
+            info.PAGE_COLORS,
+        ):
+            delta = -nav.scroll_step() if swipe == input_handler.SWIPE_UP else nav.scroll_step()
+            self._scroll.step(delta)
+            self._safe_draw()
 
-        tap = self.input.consume_tap()
-        if tap and self.screen == SCREEN_RADAR:
-            picked = radar.pick_flight_at(self.flights, tap[0], tap[1])
-            ordered = self._ordered_flights()
-            if picked and ordered:
-                try:
-                    self.flight_index = ordered.index(picked)
-                except ValueError:
-                    self.flight_index = 0
-                self.screen = SCREEN_FLIGHT
-                self._note_activity()
-                self._safe_draw()
-            elif ordered:
-                self.flight_index = 0
-                self.screen = SCREEN_FLIGHT
-                self._note_activity()
-                self._safe_draw()
-        elif tap and self.screen == SCREEN_SETTINGS:
-            self._handle_settings_tap()
+        if tap and not theme.in_visible_circle(tap[0], tap[1]):
+            tap = None
+        if (
+            tap
+            and self.screen == SCREEN_TRACKED
+            and settings.tracked_stats_mode() == settings.TRACKED_STATS_SCROLL
+            and not nav.tap_breadcrumb(tap[0], tap[1])
+        ):
+            delta = nav.scroll_step() if tap[1] >= theme.CENTER_Y else -nav.scroll_step()
+            self._apply_scroll_delta(delta)
+            tap = None
+        if tap and nav.tap_breadcrumb(tap[0], tap[1]) and self.screen != SCREEN_RADAR:
+            if self.screen == SCREEN_TRACKED:
+                self._return_to_radar()
+            elif self.screen == SCREEN_SETTINGS and self.settings_page == info.PAGE_COLORS:
+                self._set_settings_page(info.PAGE_DISPLAY)
+            elif self.screen == SCREEN_SETTINGS and self.settings_page == info.PAGE_DISPLAY:
+                self._set_settings_page(info.PAGE_MAIN)
+            else:
+                self._return_to_radar()
             self._note_activity()
             self._safe_draw()
-
-        scroll = self.input.consume_scroll()
-        if scroll and self.screen == SCREEN_RADAR:
-            if scroll > 0:
-                scale.decrease()
-            else:
-                scale.increase()
-            settings.set_scale_index(scale.active_index())
-            self._safe_draw()
-        elif scroll and self.screen == SCREEN_FLIGHT:
+        elif tap and self.screen == SCREEN_RADAR:
+            if self._open_flight_at(tap[0], tap[1]):
+                self._safe_draw()
+            elif radar.tap_on_range_header(tap[0], tap[1]):
+                scale.cycle_next()
+                settings.set_scale_index(scale.active_index())
+                self._safe_draw()
+        elif tap and self.screen == SCREEN_FLIGHT:
             ordered = self._ordered_flights()
             if ordered:
-                self.flight_index = (self.flight_index - scroll) % len(ordered)
+                self.flight_index = (self.flight_index + 1) % len(ordered)
+                self._scroll.reset()
                 self._note_activity()
                 self._safe_draw()
-        elif scroll and self.screen == SCREEN_SETTINGS:
-            self._handle_settings_knob(scroll)
+        elif tap and self.screen == SCREEN_CLOCK and clock.tap_on_time(tap[0], tap[1]):
+            settings.toggle_clock_format()
+            self._note_activity()
+            self._safe_draw()
+        elif tap and self.screen == SCREEN_SETTINGS:
+            self._handle_settings_tap(tap[0], tap[1])
             self._note_activity()
             self._safe_draw()
 
@@ -269,12 +417,19 @@ class RoundTouchDisplay:
                     if event.type in (
                         pygame.FINGERDOWN, pygame.FINGERUP,
                         pygame.MOUSEBUTTONDOWN, pygame.MOUSEBUTTONUP,
-                        pygame.MOUSEWHEEL,
+                        pygame.MOUSEMOTION,
                     ):
                         self.input.handle_event(event)
                         self._handle_navigation()
 
                 self._refresh_flights()
+                current_tracked = self.overhead.tracked_data
+                if self.screen == SCREEN_TRACKED and current_tracked != self._last_tracked_data:
+                    self._last_tracked_data = current_tracked
+                    self._safe_draw()
+                    self._last_static_draw = time.time()
+                elif self.screen != SCREEN_TRACKED:
+                    self._last_tracked_data = current_tracked
 
                 now = time.time()
                 if now - last_data_poll >= DATA_REFRESH_SECONDS:
@@ -295,7 +450,7 @@ class RoundTouchDisplay:
                         self._last_radar_draw = now
                 elif self.screen == SCREEN_CLOCK:
                     self._tick_clock()
-                elif self.screen in (SCREEN_FLIGHT, SCREEN_SETTINGS, SCREEN_DETAILS):
+                elif self.screen in (SCREEN_FLIGHT, SCREEN_SETTINGS, SCREEN_DETAILS, SCREEN_TRACKED):
                     if (now - self._last_static_draw) >= 1.0:
                         self._safe_draw()
                         self._last_static_draw = now

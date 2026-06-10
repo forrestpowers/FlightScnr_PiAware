@@ -1125,6 +1125,10 @@ class Overhead:
                     if airline_name == airline_name.upper():
                         airline_name = airline_name.title()
 
+            aircraft_type = match.aircraft_code or ""
+            if not aircraft_type:
+                aircraft_type = self.safe_get(flight_details, "aircraft_info", "typecode", default="") or ""
+
             return {
                 "callsign": flight_input,
                 "number": match.number or flight_input,
@@ -1134,7 +1138,7 @@ class Overhead:
                 "destination": match.destination_airport_iata or "",
                 "dest_lat": dest_lat or 0,
                 "dest_lon": dest_lon or 0,
-                "aircraft_type": match.aircraft_code or "",
+                "aircraft_type": aircraft_type,
                 "altitude": match.altitude,
                 "ground_speed": match.ground_speed or 0,
                 "heading": match.heading or 0,

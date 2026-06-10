@@ -144,6 +144,9 @@ class LiveFlight:
         # Airline name from aircraft_info.registered_owners
         aircraft = details.get("aircraft_info", {})
         self.airline_name = aircraft.get("registered_owners", "") or ""
+        typecode = aircraft.get("typecode", "")
+        if typecode and typecode not in ("", "N/A"):
+            self.aircraft_code = typecode
 
         # Update position from flight_info if available (more current)
         if flight_info:
@@ -151,13 +154,13 @@ class LiveFlight:
                 self.latitude = flight_info["latitude"]
             if flight_info.get("longitude"):
                 self.longitude = flight_info["longitude"]
-            if flight_info.get("altitude"):
+            if flight_info.get("altitude") is not None:
                 self.altitude = flight_info["altitude"]
-            if flight_info.get("ground_speed"):
+            if flight_info.get("ground_speed") is not None:
                 self.ground_speed = flight_info["ground_speed"]
-            if flight_info.get("heading"):
+            if flight_info.get("heading") is not None:
                 self.heading = flight_info["heading"]
-            if flight_info.get("vertical_speed"):
+            if flight_info.get("vertical_speed") is not None:
                 self.vertical_speed = flight_info["vertical_speed"]
 
 

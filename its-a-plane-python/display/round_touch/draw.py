@@ -26,7 +26,7 @@ def load_font(size: int, bold=False) -> pygame.font.Font:
 
 
 def circle_half_width_at_row(row_y: int, row_h: int) -> int:
-    r = theme.CENTER_X - theme.BEZEL_INSET
+    r = theme.VISIBLE_RADIUS
     if r <= 0 or row_h <= 0:
         return 0
     row_center = row_y + row_h // 2
@@ -68,23 +68,67 @@ def draw_center_line(
 
 
 def draw_dashed_circle(surface, center, radius, color, width=2):
-    circumference = 2 * math.pi * radius
-    dash = theme.GRID_DASH_LEN
-    gap = theme.GRID_DASH_GAP
-    step = dash + gap
-    if step <= 0:
+    """Draw a smooth dashed ring by sampling the arc every ~2 px."""
+    if radius <= 0:
         return
-    segments = max(8, int(circumference / step))
-    for i in range(segments):
-        if (i * step) % (dash + gap) >= dash:
-            continue
-        a0 = 2 * math.pi * i / segments
-        a1 = 2 * math.pi * (i + 1) / segments
-        x0 = int(center[0] + radius * math.cos(a0))
-        y0 = int(center[1] + radius * math.sin(a0))
-        x1 = int(center[0] + radius * math.cos(a1))
-        y1 = int(center[1] + radius * math.sin(a1))
-        pygame.draw.line(surface, color, (x0, y0), (x1, y1), width)
+
+    dash = max(1.0, float(theme.GRID_DASH_LEN))
+    gap = max(1.0, float(theme.GRID_DASH_GAP))
+    pattern = dash + gap
+    cx, cy = center
+
+    # Fine angular steps keep the ring circular instead of polygonal.
+    steps = max(360, int(math.ceil(2 * math.pi * radius / 2.0)))
+    angle_step = (2 * math.pi) / steps
+    arc_step = angle_step * radius
+
+    run = []
+    arc_pos = 0.0
+
+    def flush():
+        if len(run) >= 2:
+            pygame.draw.lines(surface, color, False, run, width)
+        run.clear()
+
+    for i in range(steps + 1):
+        angle = i * angle_step
+        in_dash = (arc_pos % pattern) < dash
+        pt = (int(cx + radius * math.cos(angle)), int(cy + radius * math.sin(angle)))
+        if in_dash:
+            run.append(pt)
+        elif run:
+            flush()
+        arc_pos += arc_step
+
+    flush()
+
+
+def draw_dashed_line(surface, start, end, color, width=2):
+    """Draw a dashed line between two points using the grid dash pattern."""
+    x0, y0 = start
+    x1, y1 = end
+    length = math.hypot(x1 - x0, y1 - y0)
+    if length <= 0:
+        return
+
+    dash = max(1.0, float(theme.GRID_DASH_LEN))
+    gap = max(1.0, float(theme.GRID_DASH_GAP))
+    pattern = dash + gap
+    dx = (x1 - x0) / length
+    dy = (y1 - y0) / length
+
+    pos = 0.0
+    while pos < length:
+        seg_end = min(pos + dash, length)
+        if seg_end > pos:
+            pygame.draw.line(
+                surface,
+                color,
+                (int(x0 + dx * pos), int(y0 + dy * pos)),
+                (int(x0 + dx * seg_end), int(y0 + dy * seg_end)),
+                width,
+            )
+        pos += pattern
 
 
 def draw_sweep_line(surface, angle_deg: float, color, width=2):
@@ -106,8 +150,10 @@ def draw_error(surface: pygame.Surface, message: str):
     y += theme.s(12)
     for line in _wrap_message(message, 40):
         y = draw_center_line(surface, line, y, body, theme.LABEL)
-    y += theme.s(20)
-    draw_center_line(surface, "Check: journalctl -u plane-tracker -f", y, detail, theme.HINT)
+    y += theme.s(12)
+    draw_center_line(surface, "Tap or swipe to return to radar", y, detail, theme.HINT)
+    y += theme.s(8)
+    draw_center_line(surface, "Check: journalctl -u plane-tracker -f", y, detail, theme.MUTED)
 
 
 def _wrap_message(text: str, width: int):
@@ -129,3 +175,37 @@ def _wrap_message(text: str, width: int):
 
 def fill_background(surface: pygame.Surface):
     surface.fill(theme.BG)
+
+
+_bezel_overlay = None
+_bezel_key = None
+
+
+def apply_round_bezel(surface: pygame.Surface):
+    """Mask corners outside the round visible area, then draw the extent ring."""
+    global _bezel_overlay, _bezel_key
+    size = surface.get_size()
+    key = (size, theme.CENTER_X, theme.CENTER_Y, theme.VISIBLE_RADIUS, theme.BG)
+    if _bezel_overlay is None or _bezel_key != key:
+        _bezel_overlay = pygame.Surface(size, pygame.SRCALPHA)
+        _bezel_overlay.fill((*theme.BG, 255))
+        pygame.draw.circle(
+            _bezel_overlay,
+            (0, 0, 0, 0),
+            (theme.CENTER_X, theme.CENTER_Y),
+            theme.VISIBLE_RADIUS,
+        )
+        _bezel_key = key
+    surface.blit(_bezel_overlay, (0, 0))
+    draw_visible_extent(surface)
+
+
+def draw_visible_extent(surface: pygame.Surface):
+    """White circle marking the edge of the round visible area."""
+    pygame.draw.circle(
+        surface,
+        theme.LABEL,
+        (theme.CENTER_X, theme.CENTER_Y),
+        theme.VISIBLE_RADIUS,
+        max(1, theme.s(2)),
+    )

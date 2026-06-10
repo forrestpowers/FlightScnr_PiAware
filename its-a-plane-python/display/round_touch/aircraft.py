@@ -5,6 +5,27 @@ import pygame
 
 from display.round_touch import theme
 
+# Right-side outline (nose toward -Y). Chunky flat icon: thick fuselage,
+# swept wings with blunt rounded tips, small tail stabs, no vertical fin.
+_SILHOUETTE_HALF = (
+    (0.0, -13.0),   # nose tip
+    (1.4, -12.7),
+    (2.4, -12.0),   # rounded nose
+    (2.7, -10.5),
+    (2.7, -6.0),    # fuselage fore
+    (2.7, -4.5),    # wing root (leading edge)
+    (12.0, -0.8),   # wing LE (moderate sweep, straight edge)
+    (12.4, 0.6),    # blunt rounded wingtip
+    (11.8, 2.2),    # wing trailing edge
+    (2.7, 3.4),     # wing root TE
+    (2.7, 8.5),     # fuselage aft
+    (2.6, 10.2),    # tail stab root
+    (6.2, 11.4),    # stab LE tip
+    (6.0, 12.2),    # rounded stab tip
+    (5.4, 12.6),    # stab TE
+    (2.4, 12.8),    # rounded tail
+)
+
 
 def _rotate(x, y, heading_deg):
     rad = math.radians(heading_deg)
@@ -20,37 +41,31 @@ def _map_local(lx, ly, cx, cy, heading_deg):
     return int(round(cx + rx)), int(round(cy + ry))
 
 
+def _silhouette_outline(scale: float) -> list[tuple[float, float]]:
+    half = [(x * scale, y * scale) for x, y in _SILHOUETTE_HALF]
+    outline = list(half)
+    outline.append((0.0, 13.0 * scale))
+    for x, y in reversed(half[1:]):
+        outline.append((-x, y))
+    return outline
+
+
+def _draw_silhouette(surface, cx, cy, heading_deg, color, scale: float):
+    pts = [_map_local(x, y, cx, cy, heading_deg) for x, y in _silhouette_outline(scale)]
+    if len(pts) >= 3:
+        pygame.draw.polygon(surface, color, pts)
+
+
 def draw_plane_icon(surface, cx, cy, heading_deg, color, compact=False):
-    scale = 0.55 if compact else 1.0
-    nose_y = int(-11 * scale)
-    wing_y = int(-1 * scale)
-    wing_x = int(7 * scale)
-    tail_y = int(5 * scale)
-    fin_y = int(7 * scale)
+    """Filled chunky top-down jet icon."""
+    scale = 0.40 if compact else 0.68
+    _draw_silhouette(surface, cx, cy, heading_deg, color, scale)
 
-    def line(x0, y0, x1, y1, w=2):
-        p0 = _map_local(x0, y0, cx, cy, heading_deg)
-        p1 = _map_local(x1, y1, cx, cy, heading_deg)
-        pygame.draw.line(surface, color, p0, p1, w)
 
-    line(0, nose_y, 0, tail_y, 3)
-    line(-wing_x, wing_y, 0, nose_y, 2)
-    line(wing_x, wing_y, 0, nose_y, 2)
-    line(-2, fin_y, 2, fin_y, 2)
-
-    nose_pts = [
-        _map_local(0, nose_y, cx, cy, heading_deg),
-        _map_local(-2, nose_y + 2, cx, cy, heading_deg),
-        _map_local(2, nose_y + 2, cx, cy, heading_deg),
-    ]
-    pygame.draw.polygon(surface, color, nose_pts)
-
-    tail_pts = [
-        _map_local(0, fin_y, cx, cy, heading_deg),
-        _map_local(-2, tail_y, cx, cy, heading_deg),
-        _map_local(2, tail_y, cx, cy, heading_deg),
-    ]
-    pygame.draw.polygon(surface, color, tail_pts)
+def draw_progress_plane(surface, cx, cy, color):
+    """Progress-bar marker — same icon, nose points right."""
+    scale = max(0.65, theme.s(0.58))
+    _draw_silhouette(surface, cx, cy, 90, color, scale)
 
 
 def format_altitude(alt_ft) -> str:

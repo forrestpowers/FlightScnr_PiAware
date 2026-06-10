@@ -6,12 +6,11 @@ import time
 import pygame
 
 try:
-    from config import CLOCK_FORMAT, TEMPERATURE_UNITS
+    from config import TEMPERATURE_UNITS
 except ImportError:
-    CLOCK_FORMAT = "24hr"
     TEMPERATURE_UNITS = "metric"
 
-from display.round_touch import draw, theme
+from display.round_touch import draw, nav, settings, theme
 
 _weather_cache = {"temp": None, "ts": 0}
 
@@ -31,18 +30,77 @@ def _fetch_temperature():
     return _weather_cache["temp"]
 
 
-def draw_clock(surface):
-    draw.fill_background(surface)
-    now = datetime.now()
-    use_12 = CLOCK_FORMAT.strip().lower() == "12hr"
-
-    if use_12:
+def _time_strings(now: datetime | None = None):
+    now = now or datetime.now()
+    if settings.use_12hr_clock():
         time_str = now.strftime("%I:%M").lstrip("0") or "12"
         ampm = now.strftime("%p")
     else:
         time_str = now.strftime("%H:%M")
         ampm = ""
+    return time_str, ampm
 
+
+def _ampm_top_y(time_font, ampm_font, time_y: int) -> int:
+    """Align AM/PM baseline with the clock digits."""
+    return time_y + time_font.get_ascent() - ampm_font.get_ascent()
+
+
+def _draw_time_block(surface, y: int) -> int:
+    """Draw the large time readout; return y below the block."""
+    time_font = draw.load_font(theme.FONT_CLOCK, bold=True)
+    ampm_font = draw.load_font(theme.FONT_CLOCK_AMPM, bold=True)
+    time_str, ampm = _time_strings()
+
+    if ampm:
+        gap = theme.s(10)
+        time_img = time_font.render(time_str, True, theme.SWEEP)
+        ampm_img = ampm_font.render(ampm, True, theme.SWEEP)
+        total_w = time_img.get_width() + gap + ampm_img.get_width()
+        x = theme.CENTER_X - total_w // 2
+        time_y = y
+        ampm_y = _ampm_top_y(time_font, ampm_font, time_y)
+        surface.blit(time_img, (x, time_y))
+        surface.blit(ampm_img, (x + time_img.get_width() + gap, ampm_y))
+        block_bottom = max(time_y + time_img.get_height(), ampm_y + ampm_img.get_height())
+        return block_bottom + theme.s(14)
+
+    rendered = time_font.render(time_str, True, theme.SWEEP)
+    rect = rendered.get_rect(midtop=(theme.CENTER_X, y))
+    surface.blit(rendered, rect)
+    return rect.bottom + theme.s(14)
+
+
+def time_tap_rect() -> pygame.Rect:
+    """Tap target for the large clock readout."""
+    time_font = draw.load_font(theme.FONT_CLOCK, bold=True)
+    ampm_font = draw.load_font(theme.FONT_CLOCK_AMPM, bold=True)
+    time_str, ampm = _time_strings()
+    y = nav.content_top_y() + theme.s(8)
+
+    if ampm:
+        gap = theme.s(8)
+        time_w = time_font.size(time_str)[0]
+        ampm_w = ampm_font.size(ampm)[0]
+        total_w = time_w + gap + ampm_w
+        x = theme.CENTER_X - total_w // 2
+        height = time_font.get_height()
+        return pygame.Rect(x, y, total_w, height)
+
+    rendered = time_font.render(time_str, True, theme.SWEEP)
+    return rendered.get_rect(midtop=(theme.CENTER_X, y))
+
+
+def tap_on_time(x: int, y: int) -> bool:
+    return time_tap_rect().collidepoint(x, y)
+
+
+def draw_clock(surface):
+    draw.fill_background(surface)
+    nav.draw_breadcrumb(surface, ["Radar", "Clock"])
+    nav.draw_footer(surface, ["tap time", "↑ radar"])
+
+    now = datetime.now()
     date_str = now.strftime("%a %b %d, %Y")
     tz_name = time.tzname[0] if time.tzname else "Local"
 
@@ -52,34 +110,13 @@ def draw_clock(surface):
         unit = "°F" if TEMPERATURE_UNITS == "imperial" else "°C"
         temp_line = f"{int(round(temp))}{unit}"
 
-    time_font = draw.load_font(theme.FONT_CLOCK, bold=True)
-    ampm_font = draw.load_font(theme.FONT_BODY, bold=True)
     body_font = draw.load_font(theme.FONT_BODY)
     detail_font = draw.load_font(theme.FONT_DETAIL)
 
-    block_h = theme.s(280)
-    y = theme.CENTER_Y - block_h // 2
-
-    if ampm:
-        time_w = time_font.size(time_str)[0]
-        ampm_w = ampm_font.size(ampm)[0]
-        gap = theme.s(8)
-        total_w = time_w + gap + ampm_w
-        x = theme.CENTER_X - total_w // 2
-        bottom = y + time_font.get_height()
-        surface.blit(time_font.render(time_str, True, theme.SWEEP), (x, y))
-        surface.blit(ampm_font.render(ampm, True, theme.SWEEP), (x + time_w + gap, bottom - ampm_font.get_height()))
-        y = bottom + theme.s(14)
-    else:
-        rendered = time_font.render(time_str, True, theme.SWEEP)
-        surface.blit(rendered, rendered.get_rect(midtop=(theme.CENTER_X, y)))
-        y += time_font.get_height() + theme.s(14)
-
+    y = _draw_time_block(surface, nav.content_top_y() + theme.s(8))
     y = draw.draw_center_line(surface, date_str, y, body_font, theme.LABEL)
     y += theme.s(4)
     y = draw.draw_center_line(surface, tz_name, y, detail_font, theme.HINT)
     if temp_line:
         y += theme.s(8)
-        y = draw.draw_center_line(surface, temp_line, y, body_font, theme.ROUTE)
-    y += theme.s(22)
-    draw.draw_center_line(surface, "Swipe up — Radar", y, detail_font, theme.HINT)
+        draw.draw_center_line(surface, temp_line, y, body_font, theme.ROUTE)
