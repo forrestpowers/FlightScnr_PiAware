@@ -5,9 +5,13 @@ import socket
 import pygame
 
 try:
-    from config import LOCATION_HOME
+    from config import LOCATION_HOME, web_portal_url
 except ImportError:
     LOCATION_HOME = [0.0, 0.0]
+
+    def web_portal_url(hostname: str) -> str:
+        name = (hostname or "raspberrypi").split(".")[0].strip() or "raspberrypi"
+        return f"http://{name}.local"
 
 from display.round_touch import color_presets, draw, nav, settings, theme
 
@@ -96,7 +100,7 @@ def _display_layout() -> tuple[int, int, int]:
     body_font = draw.load_font(theme.FONT_BODY)
     row_y = top + theme.s(4)
     row_h = body_font.get_height() + theme.s(8)
-    return row_y, row_h, 5
+    return row_y, row_h, 4
 
 
 def display_row_at(x: int, y: int) -> int | None:
@@ -134,7 +138,7 @@ def draw_info(surface, page: int, scroll_offset: int = 0, display_focus: int = 0
             f"Lat: {LOCATION_HOME[0]:.5f}",
             f"Lon: {LOCATION_HOME[1]:.5f}",
             f"Min height: {settings.min_height_ft()} ft",
-            f"Web: http://{_hostname()}.local:8080",
+            f"Web: {web_portal_url(_hostname())}",
         ]
         detail_font = draw.load_font(theme.FONT_DETAIL)
         gap = theme.s(2)
@@ -154,17 +158,11 @@ def draw_info(surface, page: int, scroll_offset: int = 0, display_focus: int = 0
     elif page == PAGE_DISPLAY:
         units = "miles" if settings.distance_in_miles() else "km"
         rose = "on" if settings.show_compass_rose() else "off"
-        track_mode = (
-            "scroll"
-            if settings.tracked_stats_mode() == settings.TRACKED_STATS_SCROLL
-            else "compact"
-        )
         rows = [
             f"Brightness: {settings.brightness_percent()}%",
             f"Units: {units}",
             f"Compass Rose: {rose}",
             f"Min height: {settings.min_height_ft()} ft",
-            f"Track stats: {track_mode}",
         ]
         y = top + theme.s(4)
         row_h = body_font.get_height() + theme.s(8)

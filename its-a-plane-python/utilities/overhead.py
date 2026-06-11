@@ -101,6 +101,7 @@ os.makedirs(DATA_DIR, exist_ok=True)
 LOG_FILE = os.path.join(DATA_DIR, "close.txt")
 LOG_FILE_FARTHEST = os.path.join(DATA_DIR, "farthest.txt")
 TRACKED_FILE = os.path.join(DATA_DIR, "tracked_flight.json")
+COUNTER_FILE = os.path.join(DATA_DIR, "flight_counter.json")
 MAPS_DIR = os.path.join(DATA_DIR, "maps")
 os.makedirs(MAPS_DIR, exist_ok=True)
 ROUTE_AUDIT_LOG = os.path.join(DATA_DIR, "route_audit.log")
@@ -173,6 +174,60 @@ def haversine(lat1, lon1, lat2, lon2):
     return miles * 1.609344 if DISTANCE_UNITS == "metric" else miles
 
 
+_MAX_ETA_MINUTES = 72 * 60
+_MAX_REMAINING_SECONDS = _MAX_ETA_MINUTES * 60
+
+
+def _format_time_remaining_minutes(mins_left: int) -> str | None:
+    """Format minutes as H:MM or Mm; reject zero and absurd values."""
+    if mins_left <= 0 or mins_left > _MAX_ETA_MINUTES:
+        return None
+    h = mins_left // 60
+    m = mins_left % 60
+    return f"{h}:{m:02d}" if h > 0 else f"{m}m"
+
+
+def _plausible_remaining_seconds(secs) -> bool:
+    try:
+        secs = int(secs)
+    except (TypeError, ValueError):
+        return False
+    return 0 < secs <= _MAX_REMAINING_SECONDS
+
+
+def _parse_time_remaining_minutes(time_str: str) -> int | None:
+    """Parse H:MM or Mm into total minutes; reject absurd values."""
+    if not time_str:
+        return None
+    try:
+        if ":" in time_str:
+            parts = time_str.split(":")
+            mins = int(parts[0]) * 60 + int(parts[1])
+        else:
+            mins = int(str(time_str).replace("m", ""))
+    except (ValueError, IndexError):
+        return None
+    if mins <= 0 or mins > _MAX_ETA_MINUTES:
+        return None
+    return mins
+
+
+def _flight_has_arrived(match, flight_details, fp, dist_remaining) -> bool:
+    if getattr(match, "on_ground", False):
+        return True
+    actual_arrival = (flight_details or {}).get("schedule_info", {}) or {}
+    if actual_arrival.get("actual_arrival"):
+        return True
+    eta = fp.get("eta", 0) or 0
+    if not eta or eta > time():
+        return False
+    near = 3.0 if DISTANCE_UNITS != "metric" else 5.0
+    speed = getattr(match, "ground_speed", 0) or 0
+    if dist_remaining is not None and dist_remaining <= near:
+        return True
+    return speed < 60
+
+
 def estimate_stale_data(last_data):
     data = dict(last_data)
     data["is_live"] = False
@@ -189,19 +244,12 @@ def estimate_stale_data(last_data):
     # --- Time remaining: subtract elapsed time from last known ---
     last_time_str = data.get("time_remaining", "")
     if last_time_str:
-        # Parse "H:MM" or "Mm" format
-        try:
-            if ":" in last_time_str:
-                parts = last_time_str.split(":")
-                last_mins = int(parts[0]) * 60 + int(parts[1])
-            else:
-                last_mins = int(last_time_str.replace("m", ""))
+        last_mins = _parse_time_remaining_minutes(str(last_time_str))
+        if last_mins is not None:
             est_mins = max(0, last_mins - int(elapsed_mins))
-            h = est_mins // 60
-            m = est_mins % 60
-            data["time_remaining"] = f"{h}:{m:02d}" if h > 0 else f"{m}m"
-        except (ValueError, IndexError):
-            pass
+            data["time_remaining"] = _format_time_remaining_minutes(est_mins)
+        else:
+            data["time_remaining"] = None
 
     # --- Distance remaining: subtract distance covered ---
     last_dist = data.get("dist_remaining")
@@ -239,10 +287,6 @@ def distance_from_flight_to_home(flight):
         flight.latitude, flight.longitude,
         LOCATION_DEFAULT[0], LOCATION_DEFAULT[1],
     )
-
-
-def distance_to_point(flight, lat, lon):
-    return haversine(flight.latitude, flight.longitude, lat, lon)
 
 
 # --- Local database lookups (no API calls needed) ---
@@ -332,6 +376,65 @@ def load_tracked_callsign():
             return data.get("callsign", "").strip().upper()
     except (FileNotFoundError, json.JSONDecodeError):
         return ""
+
+
+def _load_counter_log() -> dict:
+    try:
+        with open(COUNTER_FILE, "r", encoding="utf-8") as f:
+            data = json.load(f)
+            return data if isinstance(data, dict) else {}
+    except (FileNotFoundError, json.JSONDecodeError, OSError):
+        return {}
+
+
+def _save_counter_log(data: dict) -> None:
+    try:
+        from config import STATS_LOG_DAYS as max_days
+    except (ImportError, AttributeError):
+        max_days = 0
+    if max_days and max_days > 0:
+        from datetime import date, timedelta
+        cutoff = str(date.today() - timedelta(days=max_days))
+        data = {k: v for k, v in data.items() if k >= cutoff}
+    try:
+        with open(COUNTER_FILE, "w", encoding="utf-8") as f:
+            json.dump(data, f, indent=2)
+    except OSError as e:
+        logger.warning(f"Could not save flight counter: {e}")
+
+
+def log_flight_count(callsign: str, entry: dict | None = None) -> None:
+    """Record a unique callsign sighting for the daily flight statistics page."""
+    if entry is None:
+        entry = {}
+    callsign = (callsign or "").strip().upper()
+    if not callsign:
+        return
+    now = datetime.now()
+    today = str(now.date())
+    now_str = now.strftime("%H:%M:%S")
+    log = _load_counter_log()
+    if today not in log:
+        log[today] = {
+            "date": today,
+            "count": 0,
+            "flights": [],
+            "first_seen": now_str,
+            "last_seen": now_str,
+        }
+    seen = {e.get("callsign") for e in log[today].get("flights", [])}
+    if callsign not in seen:
+        log[today]["flights"].append({
+            "callsign": callsign,
+            "time": now_str,
+            "hour": now.hour,
+            "origin": entry.get("origin", ""),
+            "dest": entry.get("destination", ""),
+            "aircraft": entry.get("plane", ""),
+        })
+        log[today]["count"] = len(log[today]["flights"])
+    log[today]["last_seen"] = now_str
+    _save_counter_log(log)
 
 
 # Logging Closest Flights
@@ -454,6 +557,7 @@ class Overhead:
         self._tracked_data = None # tracked flight or None
         self._new_data = False
         self._processing = False
+        self._grab_seq = 0
         self._tracked_was_live = False       # was the flight live last poll?
         self._tracked_miss_count = 0         # consecutive polls with no result
         self._TRACKED_MISS_THRESHOLD = 3     # fallback miss threshold (no ETA)
@@ -771,6 +875,7 @@ class Overhead:
 
                         log_flight_data(entry)
                         log_farthest_flight(entry)
+                        log_flight_count(callsign, entry)
                         break
 
                     except Exception as e:
@@ -779,6 +884,8 @@ class Overhead:
                             logger.warning(f"Failed to get details for {f.callsign}: {e}")
 
             # --- STEP 1b: ADS-B live positions (adsb.fi — free, used by FlightScnr) ---
+            adsb_entries: list[dict] = []
+            by_callsign: dict[str, dict] = {}
             if ADSB_ENABLED and location_configured():
                 from utilities.adsb_client import fetch_aircraft_entries
                 adsb_entries = fetch_aircraft_entries(
@@ -791,7 +898,6 @@ class Overhead:
                     "plane_latitude", "plane_longitude", "altitude",
                     "heading", "ground_speed", "vertical_speed",
                 )
-                by_callsign = {}
                 for existing in overhead_data:
                     cs = (existing.get("callsign") or "").strip().upper()
                     if cs:
@@ -808,6 +914,7 @@ class Overhead:
                     stats["adsb_added"] += 1
                     if cs:
                         by_callsign[cs] = entry
+                        log_flight_count(cs, entry)
 
             # --- STEP 2: Tracked flight (always check; display shows it when clock is up) ---
             tracked_callsign = load_tracked_callsign()
@@ -963,6 +1070,7 @@ class Overhead:
         finally:
             with self._lock:
                 self._processing = False
+                self._grab_seq += 1
 
     def _do_auto_wipe(self):
         """Wipe tracked_flight.json and reset all tracking state."""
@@ -990,16 +1098,8 @@ class Overhead:
         match = None
 
         try:
-            # Strategy 0: check zone flights already fetched (no extra API call)
-            if zone_flights:
-                match = next(
-                    (f for f in zone_flights if (f.callsign or "").upper() == flight_input),
-                    None,
-                )
-
-            # Strategy 1: server-side callsign filter (searches FR24's full worldwide feed)
-            if not match:
-                match = self._api.find_by_callsign(flight_input)
+            # Always fetch a fresh live position — the zone feed cache can be ~90s stale.
+            match = self._api.find_by_callsign(flight_input)
 
             if not match:
                 return None
@@ -1051,32 +1151,28 @@ class Overhead:
 
             # Calculate time remaining from ETA
             time_remaining = None
-            if eta and eta > time():
-                mins_left = int((eta - time()) / 60)
-                if mins_left > 0:
-                    h = mins_left // 60
-                    m = mins_left % 60
-                    time_remaining = f"{h}:{m:02d}" if h > 0 else f"{m}m"
-            # Fallback: use remaining_time from flight_progress (seconds)
-            if not time_remaining:
-                remaining_secs = fp.get("remaining_time", 0) or 0
-                if remaining_secs > 0:
-                    mins_left = remaining_secs // 60
-                    h = mins_left // 60
-                    m = mins_left % 60
-                    time_remaining = f"{h}:{m:02d}" if h > 0 else f"{m}m"
-            # Last fallback: distance/speed
-            if not time_remaining and dist_remaining and match.ground_speed:
-                if DISTANCE_UNITS == "metric":
-                    dist_nm = dist_remaining * 0.539957
-                else:
-                    dist_nm = dist_remaining * 0.868976
-                hrs_left = dist_nm / match.ground_speed
-                mins_left = int(hrs_left * 60)
-                if mins_left > 0:
-                    h = mins_left // 60
-                    m = mins_left % 60
-                    time_remaining = f"{h}:{m:02d}" if h > 0 else f"{m}m"
+            now_ts = time()
+            has_landed = _flight_has_arrived(match, flight_details, fp, dist_remaining)
+            if not has_landed:
+                eta = fp.get("eta", 0) or 0
+                if eta and eta > now_ts:
+                    mins_left = int((eta - now_ts) / 60)
+                    time_remaining = _format_time_remaining_minutes(mins_left)
+                if not time_remaining:
+                    remaining_secs = fp.get("remaining_time", 0) or 0
+                    if _plausible_remaining_seconds(remaining_secs):
+                        time_remaining = _format_time_remaining_minutes(
+                            remaining_secs // 60
+                        )
+                if not time_remaining and dist_remaining and match.ground_speed:
+                    if DISTANCE_UNITS == "metric":
+                        dist_nm = dist_remaining * 0.539957
+                    else:
+                        dist_nm = dist_remaining * 0.868976
+                    if dist_nm > 0:
+                        hrs_left = dist_nm / match.ground_speed
+                        mins_left = int(hrs_left * 60)
+                        time_remaining = _format_time_remaining_minutes(mins_left)
 
             # Time fields for delay colour coding
             time_details = self.safe_get(flight_details, "time") or {}
@@ -1128,6 +1224,7 @@ class Overhead:
                 "owner_icao": owner_icao,
                 "airline_icao": airline_icao,
                 "is_live": True,
+                "has_landed": has_landed,
                 "origin": match.origin_airport_iata or "",
                 "destination": match.destination_airport_iata or "",
                 "dest_lat": dest_lat or 0,
@@ -1175,6 +1272,11 @@ class Overhead:
         """Thread-safe snapshot for display refresh without clearing new_data."""
         with self._lock:
             return list(self._data)
+
+    @property
+    def grab_seq(self):
+        with self._lock:
+            return self._grab_seq
 
     @property
     def tracked_data(self):

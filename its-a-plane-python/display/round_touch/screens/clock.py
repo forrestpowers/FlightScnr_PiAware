@@ -91,6 +91,16 @@ def time_tap_rect() -> pygame.Rect:
     return rendered.get_rect(midtop=(theme.CENTER_X, y))
 
 
+FOOTER_BUTTONS = ("radar",)
+
+
+def tap_footer_action(x: int, y: int) -> str | None:
+    idx = nav.tap_footer_button(x, y, len(FOOTER_BUTTONS))
+    if idx is None:
+        return None
+    return FOOTER_BUTTONS[idx]
+
+
 def tap_on_time(x: int, y: int) -> bool:
     return time_tap_rect().collidepoint(x, y)
 
@@ -98,7 +108,7 @@ def tap_on_time(x: int, y: int) -> bool:
 def draw_clock(surface):
     draw.fill_background(surface)
     nav.draw_breadcrumb(surface, ["Radar", "Clock"])
-    nav.draw_footer(surface, ["tap time", "↑ radar"])
+    nav.draw_footer_buttons(surface, list(FOOTER_BUTTONS))
 
     now = datetime.now()
     date_str = now.strftime("%a %b %d, %Y")

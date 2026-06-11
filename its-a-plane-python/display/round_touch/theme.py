@@ -1,7 +1,5 @@
 """FlightScnr visual theme — round visible area on any panel resolution."""
 
-import math
-
 REF_SIZE = 390
 
 try:
@@ -40,6 +38,8 @@ TAG_ALT_DESCEND = (255, 0, 255)
 HINT = (120, 140, 160)
 MUTED = (180, 200, 220)
 ROUTE = (100, 220, 255)
+LIVE = (56, 168, 255)
+LIVE_DIM = (12, 42, 80)
 
 GRID_OUTER_RADIUS = min(s(174), VISIBLE_RADIUS - s(16))
 CARDINAL_NORTH_OFFSET_Y = s(10)
@@ -67,15 +67,6 @@ FONT_CLOCK_AMPM = s(36)
 FONT_CARDINAL = s(23)
 FONT_TAG = s(21)
 FONT_TAG_SUB = s(17)
-
-
-def point_on_circle(bearing_deg: float, inset: float = 0) -> tuple[int, int]:
-    """Point on the visible circle rim. Bearing 0=N, 90=E, 180=S, 270=W."""
-    rad = math.radians(bearing_deg - 90)
-    r = VISIBLE_RADIUS - inset
-    x = CENTER_X + int(round(r * math.cos(rad)))
-    y = CENTER_Y + int(round(r * math.sin(rad)))
-    return x, y
 
 
 def in_visible_circle(x: float, y: float, margin: float = 0) -> bool:

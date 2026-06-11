@@ -56,7 +56,7 @@ class RoundTouchDisplay:
         self._display_focus = 0
         self._fatal_error = None
         self._scroll = nav.ScrollState()
-        self._last_tracked_data = None
+        self._last_grab_seq = 0
 
         radar._init_sweep()
         map_bg.request_background()
@@ -105,9 +105,15 @@ class RoundTouchDisplay:
         elif self.screen == SCREEN_CLOCK:
             clock.draw_clock(self.surface)
         elif self.screen == SCREEN_TRACKED:
+            if not self.overhead.processing:
+                self._refresh_flights()
+            display_data = tracked.resolve_display_data(
+                self.overhead.tracked_data,
+                self.flights,
+            )
             self._scroll.max_offset = tracked.draw_tracked(
                 self.surface,
-                self.overhead.tracked_data,
+                display_data,
                 scroll_offset=self._scroll.offset,
             )
         self._scroll.clamp()
@@ -165,9 +171,6 @@ class RoundTouchDisplay:
             settings.toggle_compass_rose()
         elif row == 3:
             settings.cycle_min_height()
-        elif row == 4:
-            settings.cycle_tracked_stats_mode()
-            self._scroll.reset()
 
     def _open_flight_at(self, x: int, y: int, alt_x: int | None = None, alt_y: int | None = None) -> bool:
         picked = radar.pick_flight_at(self.flights, x, y, alt_x, alt_y)
@@ -322,14 +325,26 @@ class RoundTouchDisplay:
                 self._return_to_radar()
                 self._safe_draw()
         elif tap and self.screen == SCREEN_TRACKED:
-            action = tracked.tap_footer_action(tap[0], tap[1])
+            action = tracked.tap_footer_action(
+                tap[0], tap[1], self.overhead.tracked_data
+            )
+            if action == "pin":
+                tracked.toggle_pinned()
+                self._note_activity()
+                self._safe_draw()
+            elif action == "radar":
+                tracked.clear_pinned()
+                self._return_to_radar()
+                self._safe_draw()
+        elif tap and self.screen == SCREEN_CLOCK:
+            action = clock.tap_footer_action(tap[0], tap[1])
             if action == "radar":
                 self._return_to_radar()
                 self._safe_draw()
-        elif tap and self.screen == SCREEN_CLOCK and clock.tap_on_time(tap[0], tap[1]):
-            settings.toggle_clock_format()
-            self._note_activity()
-            self._safe_draw()
+            elif clock.tap_on_time(tap[0], tap[1]):
+                settings.toggle_clock_format()
+                self._note_activity()
+                self._safe_draw()
         elif tap and self.screen == SCREEN_SETTINGS:
             action = info.tap_footer_action(tap[0], tap[1])
             if action == "prev":
@@ -351,6 +366,8 @@ class RoundTouchDisplay:
         if time.time() < self._boot_until:
             return
         if self.screen in (SCREEN_RADAR, SCREEN_CLOCK):
+            return
+        if self.screen == SCREEN_TRACKED and tracked.is_pinned():
             return
         if time.time() - self._secondary_activity >= SECONDARY_TIMEOUT_S:
             self._return_to_radar()
@@ -412,19 +429,22 @@ class RoundTouchDisplay:
                         self.input.handle_event(event)
                         self._handle_navigation()
 
-                self._refresh_flights()
-                current_tracked = self.overhead.tracked_data
-                if self.screen == SCREEN_TRACKED and current_tracked != self._last_tracked_data:
-                    self._last_tracked_data = current_tracked
-                    self._safe_draw()
-                    self._last_static_draw = time.time()
-                elif self.screen != SCREEN_TRACKED:
-                    self._last_tracked_data = current_tracked
-
                 now = time.time()
                 if now - last_data_poll >= DATA_REFRESH_SECONDS:
                     self._tick_data()
                     last_data_poll = now
+
+                grab_seq = self.overhead.grab_seq
+                if grab_seq != self._last_grab_seq:
+                    self._last_grab_seq = grab_seq
+                    self._refresh_flights()
+                    if self.screen == SCREEN_TRACKED:
+                        self._safe_draw()
+                        self._last_static_draw = now
+                    elif self.screen == SCREEN_RADAR:
+                        self._safe_draw()
+                        self._last_radar_draw = now
+
                 if now - last_location_check >= 2.0:
                     self._maybe_reload_location()
                     last_location_check = now
@@ -445,7 +465,15 @@ class RoundTouchDisplay:
                     self._tick_clock()
                 elif self.screen == SCREEN_TRACKED:
                     tracked.tick_marquee()
-                    interval = theme.SWEEP_FRAME_MS / 1000.0 if tracked.marquee_animating() else 1.0
+                    interval = (
+                        theme.SWEEP_FRAME_MS / 1000.0
+                        if tracked.marquee_animating()
+                        or tracked.live_status_active(
+                            self.overhead.tracked_data,
+                            self.flights,
+                        )
+                        else DATA_REFRESH_SECONDS
+                    )
                     if (now - self._last_static_draw) >= interval:
                         self._safe_draw()
                         self._last_static_draw = now

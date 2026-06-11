@@ -84,7 +84,11 @@
 
             if (loc.name) document.getElementById('location-label').textContent = `${loc.code} — ${loc.name}`;
 
-            if (!summary.length) return;
+            if (!summary.length) {
+                document.getElementById('location-label').textContent =
+                    'No flight data yet — statistics appear after aircraft are detected overhead.';
+                return;
+            }
 
             // Stats cards
             const totalFlights = summary.reduce((s,d) => s + d.count, 0);

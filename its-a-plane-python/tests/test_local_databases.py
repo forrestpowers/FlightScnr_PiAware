@@ -318,7 +318,7 @@ class TestDataPipelineIntegration:
     """Integration tests verifying data flows correctly through the pipeline."""
 
     def test_flight_entry_has_all_required_fields(self):
-        """A flight entry dict should contain all fields expected by display scenes."""
+        """A flight entry dict should contain all fields expected by the round-touch UI."""
         required_fields = [
             "airline", "plane", "origin", "destination",
             "plane_latitude", "plane_longitude",
@@ -363,7 +363,7 @@ class TestDataPipelineIntegration:
             assert field in entry, f"Missing required field: {field}"
 
     def test_tracked_flight_entry_has_all_required_fields(self):
-        """Tracked flight data dict should contain all fields expected by tracked scenes."""
+        """Tracked flight data dict should contain all fields expected by the tracked screen."""
         required_fields = [
             "callsign", "number", "airline_name", "is_live",
             "origin", "destination",

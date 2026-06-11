@@ -255,6 +255,42 @@ class TestEstimateStaleData:
         result = estimate_stale_data(data)
         assert result["dist_remaining"] == 500
 
+    def test_stale_rejects_absurd_time_remaining(self):
+        """Garbage H:MM values from bad API data are cleared."""
+        from utilities.overhead import estimate_stale_data
+        data = {
+            "is_live": True,
+            "ground_speed": 450,
+            "last_seen_ts": time.time() - 60,
+            "time_remaining": "1193046:25",
+            "dist_remaining": 500,
+        }
+        result = estimate_stale_data(data)
+        assert result.get("time_remaining") is None
+
+
+class TestTimeRemainingHelpers:
+    def test_rejects_uint32_remaining_seconds(self):
+        from utilities.overhead import _format_time_remaining_minutes, _plausible_remaining_seconds
+
+        assert _plausible_remaining_seconds(4294967295) is False
+        assert _format_time_remaining_minutes(71582788) is None
+
+    def test_arrived_on_ground_clears_eta(self):
+        from types import SimpleNamespace
+        from utilities.overhead import _flight_has_arrived
+
+        match = SimpleNamespace(on_ground=True, ground_speed=17)
+        assert _flight_has_arrived(match, {}, {"eta": 0}, 0.5) is True
+
+    def test_past_eta_near_destination_is_arrived(self):
+        from types import SimpleNamespace
+        from utilities.overhead import _flight_has_arrived
+
+        match = SimpleNamespace(on_ground=False, ground_speed=17)
+        past_eta = int(time.time()) - 600
+        assert _flight_has_arrived(match, {}, {"eta": past_eta}, 1.0) is True
+
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # Overhead Class Property Tests

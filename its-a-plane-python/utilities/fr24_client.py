@@ -668,10 +668,3 @@ class FR24Client:
             }
 
         return compat
-
-    def close(self):
-        """Clean up — no-op since we create/destroy per call now."""
-        pass
-
-    def __del__(self):
-        pass

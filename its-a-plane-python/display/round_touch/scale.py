@@ -21,18 +21,6 @@ def active_index():
     return _active_index
 
 
-def increase():
-    global _active_index
-    if _active_index < len(SCALE_BANDS) - 1:
-        _active_index += 1
-
-
-def decrease():
-    global _active_index
-    if _active_index > 0:
-        _active_index -= 1
-
-
 def cycle_next():
     """Advance to the next range band, wrapping to the smallest."""
     global _active_index
@@ -68,8 +56,3 @@ def index_for_radius_nm(radius_nm: float) -> int:
             best = i
             break
     return best
-
-
-def select_for_radius_nm(radius_nm: float):
-    """Pick the widest scale band that fits the configured search radius."""
-    select(index_for_radius_nm(radius_nm))

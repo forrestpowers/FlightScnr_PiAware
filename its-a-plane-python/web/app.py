@@ -10,6 +10,7 @@ if BASE_DIR not in sys.path:
     sys.path.insert(0, BASE_DIR)
 
 from config import (
+    WEB_PORT,
     format_location_home,
     location_configured,
     parse_lat_lon_pair,
@@ -45,6 +46,51 @@ def load_json(path, default):
     except Exception as e:
         print(f"Could not load {path}: {e}")
         return default
+
+
+def _counter_file() -> str:
+    return os.path.join(DATA_DIR, "flight_counter.json")
+
+
+def _normalize_counter_log(raw) -> dict:
+    """Return date-keyed counter log (handles legacy flat format)."""
+    if not isinstance(raw, dict) or not raw:
+        return {}
+    if "date" in raw and "callsigns" in raw:
+        day = raw["date"]
+        return {
+            day: {
+                "date": day,
+                "count": raw.get("count", len(raw.get("callsigns", []))),
+                "flights": [
+                    {"callsign": c, "time": "00:00:00", "hour": 0}
+                    for c in raw.get("callsigns", [])
+                ],
+                "first_seen": "",
+                "last_seen": "",
+            }
+        }
+    return raw
+
+
+def _load_counter_log() -> dict:
+    return _normalize_counter_log(load_json(_counter_file(), {}))
+
+
+def _counter_summary(log: dict) -> list[dict]:
+    summary = []
+    for day, data in sorted(log.items()):
+        by_hour = [0] * 24
+        for flight in data.get("flights", []):
+            by_hour[flight.get("hour", 0)] += 1
+        summary.append({
+            "date": day,
+            "count": data.get("count", len(data.get("flights", []))),
+            "by_hour": by_hour,
+            "first_seen": data.get("first_seen", ""),
+            "last_seen": data.get("last_seen", ""),
+        })
+    return summary
 
 
 def lookup_flight(callsign):
@@ -254,11 +300,57 @@ def stats_day_page(date):
     return render_template("stats_day.html", date=date)
 
 
-@app.get("/stats/json")
-def stats_json():
-    """Flight counter data."""
-    counter_file = os.path.join(DATA_DIR, "flight_counter.json")
-    return jsonify(load_json(counter_file, {}))
+@app.get("/counter")
+def flight_counter():
+    """Full flight counter log (date-keyed)."""
+    return jsonify(_load_counter_log())
+
+
+@app.get("/counter/summary")
+def flight_counter_summary():
+    """Daily summary stats for the statistics dashboard."""
+    return jsonify(_counter_summary(_load_counter_log()))
+
+
+@app.get("/airport-code")
+def airport_code():
+    """Nearest airport / journey code for local vs flyover stats."""
+    reload_location_override()
+    try:
+        from config import JOURNEY_CODE_SELECTED, LOCATION_HOME
+        code = (JOURNEY_CODE_SELECTED or "").strip().upper()
+        lat, lon = LOCATION_HOME[0], LOCATION_HOME[1]
+    except Exception:
+        code = ""
+        lat, lon = None, None
+
+    location_name = ""
+    if lat is not None and lon is not None:
+        try:
+            import requests as _req
+            r = _req.get(
+                "https://nominatim.openstreetmap.org/reverse",
+                params={"lat": lat, "lon": lon, "format": "json", "zoom": 13},
+                headers={"User-Agent": "plane-tracker-rgb-pi/1.0"},
+                timeout=5,
+            )
+            if r.status_code == 200:
+                addr = r.json().get("address", {})
+                neighbourhood = (
+                    addr.get("neighbourhood")
+                    or addr.get("suburb")
+                    or addr.get("quarter")
+                    or addr.get("village")
+                )
+                city = addr.get("city") or addr.get("town") or addr.get("county")
+                if neighbourhood and city:
+                    location_name = f"{neighbourhood}, {city}"
+                elif city:
+                    location_name = city
+        except Exception as e:
+            print(f"Reverse geocode failed: {e}")
+
+    return jsonify({"code": code, "name": location_name})
 
 
 # Serve map files from the data directory
@@ -268,4 +360,4 @@ def maps(filename):
 
 
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=8080, debug=False)
+    app.run(host="0.0.0.0", port=WEB_PORT, debug=False)

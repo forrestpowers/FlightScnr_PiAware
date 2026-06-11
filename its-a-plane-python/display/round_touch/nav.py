@@ -6,7 +6,7 @@ import math
 
 import pygame
 
-from display.round_touch import draw, theme
+from display.round_touch import buttons, draw, theme
 
 # Footer button chrome (radar-green palette)
 _BTN_FILL = (8, 38, 14)
@@ -50,11 +50,11 @@ def _footer_button_height() -> int:
     return theme.s(40)
 
 
-def _footer_band() -> tuple[int, int]:
+def _footer_band(y_offset: int = 0, button_height: int | None = None) -> tuple[int, int]:
     """Return (top_y, band_height) for the footer button row."""
-    btn_h = _footer_button_height()
+    btn_h = button_height or _footer_button_height()
     pad = theme.s(6)
-    center_y = theme.CENTER_Y + int(theme.VISIBLE_RADIUS * 0.62)
+    center_y = theme.CENTER_Y + int(theme.VISIBLE_RADIUS * 0.62) + y_offset
     top = center_y - btn_h // 2 - pad // 2
     return top, btn_h + pad
 
@@ -85,8 +85,8 @@ def content_top_y(has_dots: bool = False) -> int:
     return _top_y() + theme.s(36)
 
 
-def content_bottom_y() -> int:
-    top, _ = _footer_band()
+def content_bottom_y(footer_y_offset: int = 0) -> int:
+    top, _ = _footer_band(footer_y_offset)
     return top - theme.s(10)
 
 
@@ -168,18 +168,31 @@ def draw_footer(surface: pygame.Surface, hints: list[str]):
         x += img.get_width() + spacing
 
 
-def footer_button_rects(button_count: int) -> list[pygame.Rect]:
+def footer_button_rects(
+    button_count: int,
+    *,
+    y_offset: int = 0,
+    button_size: int | None = None,
+    button_gap: int | None = None,
+) -> list[pygame.Rect]:
     """Equal-width footer tap targets, left to right."""
     if button_count <= 0:
         return []
-    top, band_h = _footer_band()
-    btn_h = _footer_button_height()
-    gap = theme.s(10)
+    top, band_h = _footer_band(y_offset, button_size)
+    btn_h = button_size or _footer_button_height()
+    gap = button_gap if button_gap is not None else theme.s(10)
     y = top + (band_h - btn_h) // 2
     max_w = _max_text_width(y + btn_h // 2, btn_h)
     total_gap = gap * max(0, button_count - 1)
-    btn_w = (max_w - total_gap) // button_count
-    btn_w = min(btn_w, theme.s(78))
+    if button_size:
+        btn_w = btn_h
+        total_w = btn_w * button_count + total_gap
+        if total_w > max_w:
+            btn_w = max(theme.s(28), (max_w - total_gap) // button_count)
+            btn_h = btn_w
+    else:
+        btn_w = (max_w - total_gap) // button_count
+        btn_w = min(btn_w, theme.s(78))
     total_w = btn_w * button_count + total_gap
     x0 = theme.CENTER_X - total_w // 2
     return [
@@ -236,22 +249,87 @@ def _draw_radar_icon(surface: pygame.Surface, center: tuple[int, int], radius: i
     pygame.draw.circle(surface, theme.AIRCRAFT, (blip_x, blip_y), max(2, theme.s(3)))
 
 
-def _draw_footer_button(surface: pygame.Surface, rect: pygame.Rect, kind: str):
-    accent = kind == "radar"
+def _draw_pin_icon(
+    surface: pygame.Surface,
+    center: tuple[int, int],
+    size: int,
+    color,
+    *,
+    active: bool = False,
+):
+    """Map-pin icon — filled head and point, readable at small sizes."""
+    del color
+    cx, cy = center
+    s = max(11, size)
+    head_r = max(4, int(s * 0.4))
+    head_cy = cy - int(s * 0.28)
+    tip_y = cy + int(s * 0.46)
+    w = max(1, theme.s(2))
+
+    if active:
+        fill = theme.SWEEP
+        pygame.draw.circle(surface, fill, (cx, head_cy), head_r)
+        pts = [
+            (cx - head_r + 1, head_cy + head_r - 1),
+            (cx + head_r - 1, head_cy + head_r - 1),
+            (cx, tip_y),
+        ]
+        pygame.draw.polygon(surface, fill, pts)
+        pygame.draw.circle(surface, _BTN_FILL, (cx, head_cy), max(2, head_r // 3))
+        return
+
+    fill = _BTN_FILL_ACCENT
+    outline = theme.SWEEP
+    pygame.draw.circle(surface, fill, (cx, head_cy), head_r)
+    pygame.draw.circle(surface, outline, (cx, head_cy), head_r, w)
+    pts = [
+        (cx - head_r + 1, head_cy + head_r - 1),
+        (cx + head_r - 1, head_cy + head_r - 1),
+        (cx, tip_y),
+    ]
+    pygame.draw.polygon(surface, fill, pts)
+    pygame.draw.polygon(surface, outline, pts, w)
+    pygame.draw.circle(surface, fill, (cx, head_cy), max(2, head_r // 4))
+    pygame.draw.circle(surface, outline, (cx, head_cy), max(2, head_r // 4), 1)
+
+
+def _draw_footer_button(
+    surface: pygame.Surface, rect: pygame.Rect, kind: str, *, active: bool = False
+):
+    draw_w, draw_h = buttons.button_draw_size(kind, rect.width, rect.height)
+    png = buttons.load_button_surface(
+        kind,
+        draw_w,
+        draw_h,
+        active=active,
+    )
+    if png is not None:
+        surface.blit(png, png.get_rect(center=rect.center))
+        return
+
+    accent = kind == "radar" or (kind == "pin" and active)
     _draw_round_button(surface, rect, accent=accent)
     icon_color = _BTN_ICON_ACCENT if accent else _BTN_ICON
     label_font = draw.load_font(theme.s(11))
-    labels = {"prev": "PREV", "next": "NEXT", "radar": "RADAR"}
+    labels = {"prev": "PREV", "next": "NEXT", "radar": "RADAR", "pin": "PIN IT"}
     label = labels.get(kind, kind.upper())
 
     icon_cy = rect.centery - theme.s(6)
-    icon_size = theme.s(7)
+    icon_size = theme.s(10) if kind == "pin" else theme.s(7)
     if kind == "prev":
         _draw_nav_arrow(surface, (rect.centerx, icon_cy), icon_size, icon_color, left=True)
     elif kind == "next":
         _draw_nav_arrow(surface, (rect.centerx, icon_cy), icon_size, icon_color, left=False)
     elif kind == "radar":
         _draw_radar_icon(surface, (rect.centerx, icon_cy), icon_size, icon_color)
+    elif kind == "pin":
+        _draw_pin_icon(
+            surface,
+            (rect.centerx, icon_cy),
+            icon_size,
+            theme.SWEEP,
+            active=active,
+        )
 
     label_color = theme.SWEEP if accent else theme.HINT
     text = draw.fit_text(label, label_font, rect.width - theme.s(6))
@@ -259,17 +337,50 @@ def _draw_footer_button(surface: pygame.Surface, rect: pygame.Rect, kind: str):
     surface.blit(rendered, rendered.get_rect(midtop=(rect.centerx, icon_cy + theme.s(10))))
 
 
-def draw_footer_buttons(surface: pygame.Surface, kinds: list[str]):
-    """Draw tappable footer buttons. Kinds: prev, next, radar."""
+def draw_footer_buttons(
+    surface: pygame.Surface,
+    kinds: list[str],
+    *,
+    y_offset: int = 0,
+    button_size: int | None = None,
+    button_gap: int | None = None,
+    pin_active: bool = False,
+):
+    """Draw tappable footer buttons. Kinds: prev, next, radar, pin."""
     if not kinds:
         return
-    for kind, rect in zip(kinds, footer_button_rects(len(kinds))):
-        _draw_footer_button(surface, rect, kind)
+    rects = footer_button_rects(
+        len(kinds),
+        y_offset=y_offset,
+        button_size=button_size,
+        button_gap=button_gap,
+    )
+    for kind, rect in zip(kinds, rects):
+        _draw_footer_button(
+            surface,
+            rect,
+            kind,
+            active=(kind == "pin" and pin_active),
+        )
 
 
-def tap_footer_button(x: int, y: int, button_count: int) -> int | None:
+def tap_footer_button(
+    x: int,
+    y: int,
+    button_count: int,
+    *,
+    y_offset: int = 0,
+    button_size: int | None = None,
+    button_gap: int | None = None,
+) -> int | None:
     """Return tapped footer button index (0=left), or None."""
-    for i, rect in enumerate(footer_button_rects(button_count)):
+    rects = footer_button_rects(
+        button_count,
+        y_offset=y_offset,
+        button_size=button_size,
+        button_gap=button_gap,
+    )
+    for i, rect in enumerate(rects):
         if rect.collidepoint(x, y):
             return i
     return None

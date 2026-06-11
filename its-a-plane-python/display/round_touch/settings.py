@@ -12,8 +12,6 @@ DATA_DIR = os.environ.get("PLANE_TRACKER_DATA_DIR", "/var/lib/plane-tracker")
 SETTINGS_PATH = os.path.join(DATA_DIR, "round_touch_settings.json")
 
 MIN_HEIGHT_OPTIONS = (500, 1000, 1500)
-TRACKED_STATS_COMPACT = "compact"
-TRACKED_STATS_SCROLL = "scroll"
 
 _defaults = {
     "brightness_percent": 100,
@@ -23,7 +21,6 @@ _defaults = {
     "theme_index": color_presets.DEFAULT_THEME_INDEX,
     "clock_12hr": True,
     "min_height_ft": 1000,
-    "tracked_stats_mode": TRACKED_STATS_COMPACT,
 }
 
 
@@ -95,6 +92,9 @@ def _load():
         migrated = True
     else:
         state["min_height_ft"] = _snap_min_height(state["min_height_ft"])
+    if "tracked_stats_mode" in state:
+        del state["tracked_stats_mode"]
+        migrated = True
     if migrated:
         _save(state)
     return state
@@ -185,22 +185,6 @@ def use_12hr_clock() -> bool:
 
 def toggle_clock_format():
     _state["clock_12hr"] = not use_12hr_clock()
-    _save(_state)
-
-
-def tracked_stats_mode() -> str:
-    mode = _state.get("tracked_stats_mode", TRACKED_STATS_COMPACT)
-    if mode not in (TRACKED_STATS_COMPACT, TRACKED_STATS_SCROLL):
-        return TRACKED_STATS_COMPACT
-    return mode
-
-
-def cycle_tracked_stats_mode():
-    _state["tracked_stats_mode"] = (
-        TRACKED_STATS_SCROLL
-        if tracked_stats_mode() == TRACKED_STATS_COMPACT
-        else TRACKED_STATS_COMPACT
-    )
     _save(_state)
 
 

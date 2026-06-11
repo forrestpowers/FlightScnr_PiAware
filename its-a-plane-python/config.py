@@ -211,10 +211,24 @@ if not TEMPERATURE_LOCATION and location_configured():
 TEMPERATURE_UNITS = os.environ.get("TEMPERATURE_UNITS", "metric")
 FORECAST_DAYS = int(os.environ.get("FORECAST_DAYS", "3"))
 
+# --- Web portal ---
+WEB_PORT = int(os.environ.get("WEB_PORT", "80"))
+
+
+def web_portal_url(hostname: str) -> str:
+    """LAN URL for the web portal (omits :80)."""
+    name = (hostname or "raspberrypi").split(".")[0].strip() or "raspberrypi"
+    host = f"{name}.local"
+    if WEB_PORT == 80:
+        return f"http://{host}"
+    return f"http://{host}:{WEB_PORT}"
+
+
 # --- Display & units ---
 DISPLAY_WIDTH = int(os.environ.get("DISPLAY_WIDTH", "1080"))
 DISPLAY_HEIGHT = int(os.environ.get("DISPLAY_HEIGHT", "1080"))
 DISPLAY_FULLSCREEN = _bool(os.environ.get("DISPLAY_FULLSCREEN", "True"))
+BUTTONS_DIR = os.environ.get("BUTTONS_DIR", "").strip()
 SDL_VIDEODRIVER = os.environ.get("SDL_VIDEODRIVER", "")
 
 DISTANCE_UNITS = os.environ.get("DISTANCE_UNITS", "metric")
@@ -242,6 +256,7 @@ def passes_altitude_filter(alt_ft) -> bool:
         return MIN_ALTITUDE <= 0
     return MIN_ALTITUDE <= alt < MAX_ALTITUDE_FT
 JOURNEY_CODE_SELECTED = _require("JOURNEY_CODE_SELECTED")
+STATS_LOG_DAYS = int(os.environ.get("STATS_LOG_DAYS", "0"))
 _raw_filler = os.environ.get("JOURNEY_BLANK_FILLER", "").strip()
 JOURNEY_BLANK_FILLER = f" {_raw_filler} " if _raw_filler else " ? "
 SPEED_UNITS = os.environ.get("SPEED_UNITS", "metric")

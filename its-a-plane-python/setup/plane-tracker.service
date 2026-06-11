@@ -1,7 +1,9 @@
 [Unit]
 Description=Plane Tracker Round Touch Display
-After=network-online.target graphical.target
-Wants=network-online.target graphical.target
+# Start after X11 (DISPLAY=:0); do not After=graphical.target while WantedBy=multi-user
+# — that creates an ordering cycle (multi-user → plane-tracker → graphical → multi-user).
+After=network-online.target display-manager.service
+Wants=network-online.target
 
 [Service]
 Type=simple
@@ -27,4 +29,4 @@ User=root
 Group=root
 
 [Install]
-WantedBy=multi-user.target
+WantedBy=graphical.target
