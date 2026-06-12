@@ -173,6 +173,4 @@ All settings are environment variables — see `.env.example`. Production values
 ## Credits
 
 - [FlightScnr](https://github.com/yashmulgaonkar/FlightScnr) — round radar UI design
-- [Colin Waddell / its-a-plane-python](https://github.com/ColinWaddell/its-a-plane-python) — original flight tracker
-- [c0wsaysmoo/plane-tracker-rgb-pi](https://github.com/c0wsaysmoo/plane-tracker-rgb-pi) — RGB matrix fork and web portal foundation
-- [ajplotkin/plane-tracker-rgb-pi](https://github.com/ajplotkin/plane-tracker-rgb-pi) — local airport/airline databases and pipeline improvements
+- Parts of this repo are based on code by [c0wsaysmoo](https://github.com/c0wsaysmoo), used with their prior written permission. Thank you!!
