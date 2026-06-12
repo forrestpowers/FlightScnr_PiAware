@@ -27,6 +27,7 @@ VISIBLE_RADIUS = SIZE // 2 - BEZEL_INSET
 # Colors (FlightScnr radar_theme.h)
 BG = (2, 15, 3)
 GRID = (16, 100, 32)
+PAGE_DOT_INACTIVE = (8, 42, 14)
 CROSSHAIR = GRID
 SWEEP = (48, 255, 96)
 SWEEP_TRAIL = (12, 72, 28)

@@ -117,8 +117,22 @@ class RoundTouchDisplay:
                 scroll_offset=self._scroll.offset,
             )
         self._scroll.clamp()
+        remaining = self._timeout_remaining_fraction()
+        if remaining is not None:
+            draw.draw_timeout_ring(self.surface, remaining)
         draw.apply_round_bezel(self.surface)
         pygame.display.flip()
+
+    def _timeout_remaining_fraction(self) -> float | None:
+        """Fraction of secondary-screen timeout remaining, or None if not applicable."""
+        if time.time() < self._boot_until:
+            return None
+        if self.screen in (SCREEN_RADAR, SCREEN_CLOCK):
+            return None
+        if self.screen == SCREEN_TRACKED and tracked.is_pinned():
+            return None
+        elapsed = time.time() - self._secondary_activity
+        return max(0.0, (SECONDARY_TIMEOUT_S - elapsed) / SECONDARY_TIMEOUT_S)
 
     def _safe_draw(self):
         try:
@@ -345,6 +359,11 @@ class RoundTouchDisplay:
                 settings.toggle_clock_format()
                 self._note_activity()
                 self._safe_draw()
+        elif tap and self.screen == SCREEN_DETAILS:
+            action = details.tap_footer_action(tap[0], tap[1])
+            if action == "radar":
+                self._return_to_radar()
+                self._safe_draw()
         elif tap and self.screen == SCREEN_SETTINGS:
             action = info.tap_footer_action(tap[0], tap[1])
             if action == "prev":
@@ -474,11 +493,13 @@ class RoundTouchDisplay:
                         )
                         else DATA_REFRESH_SECONDS
                     )
+                    if self._timeout_remaining_fraction() is not None:
+                        interval = min(interval, 0.25)
                     if (now - self._last_static_draw) >= interval:
                         self._safe_draw()
                         self._last_static_draw = now
                 elif self.screen in (SCREEN_FLIGHT, SCREEN_SETTINGS, SCREEN_DETAILS):
-                    if (now - self._last_static_draw) >= 1.0:
+                    if (now - self._last_static_draw) >= 0.25:
                         self._safe_draw()
                         self._last_static_draw = now
 

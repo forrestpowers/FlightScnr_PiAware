@@ -39,7 +39,7 @@ class ScrollState:
 
 def _top_y() -> int:
     # Top of the round dial — stay off the rim where horizontal space is tight.
-    return theme.CENTER_Y - int(theme.VISIBLE_RADIUS * 0.68)
+    return theme.CENTER_Y - int(theme.VISIBLE_RADIUS * 0.75) # 0.68, 0.72 higher, 0.62 lower
 
 
 def _footer_top_y() -> int:
@@ -94,9 +94,15 @@ def scroll_step() -> int:
     return theme.s(36)
 
 
-def draw_breadcrumb(surface: pygame.Surface, parts: list[str]):
+def draw_breadcrumb(
+    surface: pygame.Surface,
+    parts: list[str],
+    *,
+    active_color=None,
+):
     if not parts:
         return
+    active = active_color if active_color is not None else theme.SWEEP
     font = draw.load_font(theme.FONT_DETAIL)
     sep_str = " › "
     sep = font.render(sep_str, True, theme.HINT)
@@ -108,7 +114,7 @@ def draw_breadcrumb(surface: pygame.Surface, parts: list[str]):
     rendered = []
     total_w = 0
     for i, part in enumerate(display):
-        color = theme.SWEEP if i == len(display) - 1 else theme.MUTED
+        color = active if i == len(display) - 1 else theme.MUTED
         used = total_w + (sep.get_width() if rendered else 0)
         remaining = max(20, max_w - used)
         text = draw.fit_text(part, font, remaining)
@@ -133,9 +139,17 @@ def draw_breadcrumb(surface: pygame.Surface, parts: list[str]):
             x += sep.get_width()
 
 
-def draw_page_dots(surface: pygame.Surface, active: int, total: int, y: int | None = None):
+def draw_page_dots(
+    surface: pygame.Surface,
+    active: int,
+    total: int,
+    y: int | None = None,
+    *,
+    active_color=None,
+):
     if total <= 1:
         return
+    active_dot = active_color if active_color is not None else theme.SWEEP
     if y is None:
         y = _top_y() + theme.s(30)
     gap = theme.s(14)
@@ -144,7 +158,7 @@ def draw_page_dots(surface: pygame.Surface, active: int, total: int, y: int | No
     x0 = theme.CENTER_X - span // 2
     for i in range(total):
         cx = x0 + i * gap
-        color = theme.SWEEP if i == active else theme.GRID
+        color = active_dot if i == active else theme.PAGE_DOT_INACTIVE
         pygame.draw.circle(surface, color, (cx, y), r)
 
 

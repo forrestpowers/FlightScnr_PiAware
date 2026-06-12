@@ -41,7 +41,7 @@ def draw_flight_detail(surface, flights, selected_index, scroll_offset: int = 0)
     f = flights[idx]
     callsign = display_flight_id_for_flight(f)
     nav.draw_breadcrumb(surface, ["Radar", "Flight", callsign])
-    nav.draw_page_dots(surface, idx, len(flights))
+    nav.draw_page_dots(surface, idx, len(flights), active_color=theme.LABEL)
 
     airline = f.get("airline") or "Airline unknown"
     origin = f.get("origin") or "—"

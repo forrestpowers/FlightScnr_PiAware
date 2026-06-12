@@ -3,6 +3,14 @@
 from display.round_touch import draw, nav, theme
 
 VERSION = "1.0.0"
+FOOTER_BUTTONS = ("radar",)
+
+
+def tap_footer_action(x: int, y: int) -> str | None:
+    idx = nav.tap_footer_button(x, y, len(FOOTER_BUTTONS))
+    if idx is None:
+        return None
+    return FOOTER_BUTTONS[idx]
 
 
 def draw_details(surface, boot_splash=False, scroll_offset: int = 0) -> int:
@@ -24,5 +32,5 @@ def draw_details(surface, boot_splash=False, scroll_offset: int = 0) -> int:
         "Yash Mulgaonkar",
     ]
     max_scroll = nav.draw_lines_scrolled(surface, lines, body_font, theme.LABEL, scroll_offset, start_y=top)
-    nav.draw_footer(surface, ["↕ scroll", "↓ radar"])
+    nav.draw_footer_buttons(surface, list(FOOTER_BUTTONS))
     return max_scroll

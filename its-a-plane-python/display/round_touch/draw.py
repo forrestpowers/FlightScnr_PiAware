@@ -177,6 +177,33 @@ def fill_background(surface: pygame.Surface):
     surface.fill(theme.BG)
 
 
+def draw_timeout_ring(surface: pygame.Surface, remaining_fraction: float) -> None:
+    """Countdown ring on the visible perimeter. 1.0 = full time left, 0.0 = expired."""
+    remaining_fraction = max(0.0, min(1.0, remaining_fraction))
+    if remaining_fraction <= 0:
+        return
+
+    cx, cy = theme.CENTER_X, theme.CENTER_Y
+    width = max(2, theme.s(3))
+    r = theme.VISIBLE_RADIUS - width // 2 - theme.s(2)
+
+    pygame.draw.circle(surface, theme.SWEEP_TRAIL, (cx, cy), r, width)
+
+    if remaining_fraction >= 0.999:
+        pygame.draw.circle(surface, theme.SWEEP, (cx, cy), r, width)
+        return
+
+    start = -math.pi / 2
+    sweep = 2 * math.pi * remaining_fraction
+    steps = max(24, int(r * sweep / 2))
+    points = [
+        (cx + int(r * math.cos(start + sweep * i / steps)), cy + int(r * math.sin(start + sweep * i / steps)))
+        for i in range(steps + 1)
+    ]
+    if len(points) >= 2:
+        pygame.draw.lines(surface, theme.SWEEP, False, points, width)
+
+
 _bezel_overlay = None
 _bezel_key = None
 
