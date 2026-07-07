@@ -1,16 +1,18 @@
 #!/bin/bash
 # install-pi.sh — Install or update FlightScnr Pi on a Raspberry Pi.
 #
+# Requires: Raspberry Pi OS with desktop (X11 on :0), round touch LCD, network.
+#
 # First install (after clone):
 #   git clone https://github.com/yashmulgaonkar/FlightScnr_Pi.git ~/FlightScnr_Pi
 #   cd ~/FlightScnr_Pi
 #   sudo bash install-pi.sh
 #
-# Update (git pull + re-sync):
+# Update (git pull + re-sync, skips apt for speed):
 #   bash ~/FlightScnr_Pi/install-pi.sh update
 #
 # Usage:
-#   sudo bash install-pi.sh [install] [--no-start]
+#   sudo bash install-pi.sh [install] [--no-start] [--skip-apt]
 #   bash install-pi.sh update
 #
 set -euo pipefail
@@ -184,12 +186,43 @@ setup_venv() {
     log_ok "Python dependencies installed"
 }
 
+verify_python_deps() {
+    log_step "Verifying Python dependencies"
+    if "$VENV_DIR/bin/python" -c "import pygame, fr24, flask, httpx" >/dev/null 2>&1; then
+        log_ok "Core imports OK (pygame, fr24, flask, httpx)"
+        return 0
+    fi
+    log_warn "Import check failed — service may not start; review pip output above"
+    return 1
+}
+
 setup_data_dir() {
     log_step "Runtime data directory"
     install -d -m 0755 "$DATA_DIR"
     install -d -m 0755 "$DATA_DIR/maps"
     chown -R "$REPO_OWNER:$REPO_OWNER" "$DATA_DIR"
     log_ok "$DATA_DIR ready (owned by $REPO_OWNER)"
+}
+
+setup_config_h() {
+    local example="$REPO_ROOT/config.h.example"
+    local dest="$REPO_ROOT/config.h"
+
+    if [ -f "$dest" ]; then
+        log_ok "config.h present — edit API keys or use the web portal"
+        return 0
+    fi
+
+    if [ ! -f "$example" ]; then
+        log_warn "config.h.example missing — use web portal or $ENV_DEST"
+        return 0
+    fi
+
+    log_step "Creating config.h from template"
+    cp "$example" "$dest"
+    chown "$REPO_OWNER:$REPO_OWNER" "$dest"
+    chmod 0644 "$dest"
+    log_ok "Created config.h from config.h.example"
 }
 
 setup_env_file() {
@@ -208,11 +241,7 @@ setup_env_file() {
         chmod 0600 "$ENV_DEST"
     fi
 
-    if [ ! -f "$REPO_ROOT/config.h" ]; then
-        log_warn "config.h missing — create one from the repo template after install"
-    else
-        log_ok "config.h found — edit API keys there or use the web portal"
-    fi
+    setup_config_h
 }
 
 install_systemd_service() {
@@ -223,7 +252,6 @@ install_systemd_service() {
     log_step "Installing systemd service (persists across reboot)"
     sed \
         -e "s|__REPO_DIR__|$REPO_ROOT|g" \
-        -e "s|__DESKTOP_USER__|$REPO_OWNER|g" \
         -e "s|__XAUTHORITY__|$xauthority|g" \
         -e "s|__XDG_RUNTIME_DIR__|$runtime_dir|g" \
         "$service_src" > "$SERVICE_DEST"
@@ -258,9 +286,11 @@ start_service() {
 
 cmd_install() {
     local no_start=0
+    local skip_apt=0
     for arg in "$@"; do
         case "$arg" in
             --no-start) no_start=1 ;;
+            --skip-apt) skip_apt=1 ;;
             *) echo "Unknown option: $arg" >&2; exit 1 ;;
         esac
     done
@@ -276,12 +306,17 @@ cmd_install() {
     echo "  Data:    $DATA_DIR"
     echo "============================================"
 
-    install_apt_packages
+    if [ "$skip_apt" -eq 0 ]; then
+        install_apt_packages
+    else
+        log_ok "Skipped apt packages (--skip-apt)"
+    fi
     install_ui_fonts
     install_weather_icons
     install_aircraft_icons
     extract_logos
     setup_venv
+    verify_python_deps || true
     setup_data_dir
     setup_env_file
     install_systemd_service
@@ -300,7 +335,8 @@ cmd_install() {
     echo ""
     echo "  Service:   sudo systemctl status flightscnr"
     echo "  Logs:      sudo journalctl -u flightscnr -f"
-    echo "  Config:    edit $REPO_ROOT/config.h  OR  web portal → API Keys"
+    echo "  Config:    nano $REPO_ROOT/config.h"
+    echo "             OR web portal → API Keys (http://raspberrypi.local)"
     echo "             (advanced: sudo nano $ENV_DEST)"
     echo "  Reboot:    starts automatically (systemctl is-enabled flightscnr)"
     echo "  Update:    bash $REPO_ROOT/install-pi.sh update"
@@ -334,17 +370,19 @@ cmd_update() {
     if [ "$(id -u)" -ne 0 ]; then
         echo ""
         echo "Re-syncing install (needs root)..."
-        exec sudo bash "$REPO_ROOT/install-pi.sh" install
+        exec sudo bash "$REPO_ROOT/install-pi.sh" install --skip-apt
     else
-        cmd_install
+        cmd_install --skip-apt
     fi
 }
 
 usage() {
     cat <<EOF
 Usage:
-  sudo bash install-pi.sh [install] [--no-start]   First install or re-sync
-  bash install-pi.sh update                        git pull + re-sync + restart
+  sudo bash install-pi.sh [install] [--no-start] [--skip-apt]
+      First install or full re-sync (includes apt packages)
+  bash install-pi.sh update
+      git pull + re-sync + restart (skips apt for speed)
 
 EOF
 }

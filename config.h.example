@@ -1,17 +1,19 @@
 // ═══════════════════════════════════════════════════════════════════════════
-// FlightScnr Pi — API keys & home location
+// FlightScnr Pi — API keys & home location (template)
 // ═══════════════════════════════════════════════════════════════════════════
 //
-// Edit this file with any text editor, save, then restart:
+// On first install, install-pi.sh copies this file to config.h (if missing).
+// Edit config.h with any text editor, save, then restart:
 //   sudo systemctl restart flightscnr
 //
 // You can also set keys from the web portal at http://raspberrypi.local
-// (saved separately — portal keys override config.h when env vars are not set)
+// (saved to /var/lib/flightscnr/secrets.json).
 //
-// Lines starting with // are comments. Examples below — replace with your keys.
+// Priority (highest wins): /etc/flightscnr.env → web portal → config.h
+//
+// Lines starting with // are comments.
 
 // FlightRadar24 subscription (format: subscription_key|jwt_token)
-// Get keys from your FR24 subscription / the fr24 Python package docs.
 FR24_API_KEY =
 
 // Tomorrow.io weather — https://www.tomorrow.io/weather-api/
@@ -20,6 +22,6 @@ TOMORROW_API_KEY =
 // Optional — schedule lookup when a flight is not airborne yet
 // AIRLABS_API_KEY =
 
-// Radar center (optional if you set location in the web portal)
+// Radar center (or set location in the web portal)
 HOME_LAT = 37.619664
 HOME_LON = -122.372035

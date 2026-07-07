@@ -2,6 +2,7 @@
 .env
 .env.local
 .env.production
+config.h
 
 # Python
 __pycache__/

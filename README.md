@@ -26,7 +26,9 @@ cd ~/FlightScnr_Pi
 sudo bash install-pi.sh
 ```
 
-This installs system packages, creates a virtualenv, extracts airline logos from `logo.zip`, creates `/var/lib/flightscnr/`, installs `/etc/flightscnr.env`, and registers the `flightscnr` systemd service.
+This installs system packages, creates a virtualenv, downloads UI assets (fonts, weather icons, aircraft icons), extracts airline logos from `logo.zip`, creates `config.h` from `config.h.example`, creates `/var/lib/flightscnr/`, installs `/etc/flightscnr.env`, and registers the `flightscnr` systemd service.
+
+**Requires:** Raspberry Pi OS with desktop (X11), round touch display, network on first install.
 
 ### Updates (git pull)
 
@@ -36,7 +38,7 @@ After the initial install, updates are a single command:
 bash ~/FlightScnr_Pi/install-pi.sh update
 ```
 
-That runs `git pull --ff-only`, refreshes Python dependencies if `requirements.txt` changed, reinstalls the systemd unit if needed, and restarts the service.
+That runs `git pull --ff-only`, refreshes Python dependencies if `requirements.txt` changed, reinstalls the systemd unit if needed, and restarts the service (skips `apt` for speed). For a full re-sync including system packages: `sudo bash install-pi.sh install`.
 
 Or manually:
 
@@ -50,7 +52,9 @@ sudo bash install-pi.sh
 
 | Path | Purpose |
 |------|---------|
-| `/etc/flightscnr.env` | API keys and settings (never overwritten by install) |
+| `config.h` | Local API keys and home location (created from `config.h.example`; not in git) |
+| `/etc/flightscnr.env` | Systemd environment (never overwritten by install) |
+| `/var/lib/flightscnr/secrets.json` | API keys saved from the web portal |
 | `/var/lib/flightscnr/` | Runtime data, maps, web portal state |
 | `.venv/` | Python virtualenv (refreshed on install) |
 | `logo/` | Extracted from `logo.zip` on install |
@@ -58,29 +62,31 @@ sudo bash install-pi.sh
 
 ### 2. Configure
 
-Copy and edit environment settings:
+**Easiest:** open the web portal from any device on your LAN — `http://raspberrypi.local` → **API Keys** → Save.
+
+**Or edit `config.h`** in the project folder (created automatically on first install):
 
 ```bash
-cp .env.example .env
-nano .env
-```
-
-On first install, `install-pi.sh` copies `.env` → `/etc/flightscnr.env` (if that file does not already exist). After that, edit production config there:
-
-```bash
-sudo nano /etc/flightscnr.env
+nano ~/FlightScnr_Pi/config.h
 sudo systemctl restart flightscnr
 ```
 
-| Variable | Required? | What it does |
-|----------|-----------|--------------|
+**Config priority** (highest wins):
+
+1. `/etc/flightscnr.env` (systemd — advanced)
+2. Web portal → `/var/lib/flightscnr/secrets.json`
+3. `config.h` in the repo root
+
+| Setting | Required? | What it does |
+|---------|-----------|--------------|
 | `FR24_API_KEY` | **Yes** (full app) | FR24 gRPC feed — routes, airlines, flight details, tracked flights |
 | `TOMORROW_API_KEY` | **Yes** (clock weather) | Temperature on the clock screen |
 | `HOME_LAT` / `HOME_LON` | **Yes** | Radar center and search zone |
 | `AIRLABS_API_KEY` | Optional | Pre-departure schedule when a flight isn't airborne yet |
-| `ADSB_ENABLED` | Default `True` | Free ADS-B positions; sole radar source if FR24 is missing |
 
-Without `FR24_API_KEY`, the app still starts but only shows ADS-B aircraft (callsign, position, altitude — no routes or rich flight-detail screens). See `.env.example` for all options.
+Without `FR24_API_KEY`, the app still starts but only shows ADS-B aircraft (callsign, position, altitude — no routes or rich flight-detail screens). See `config.h.example` and `.env.example` for all options.
+
+**Advanced:** edit `/etc/flightscnr.env` directly (`sudo nano /etc/flightscnr.env`). Created from `.env.example` on first install if it does not already exist.
 
 Display settings for the round panel:
 
