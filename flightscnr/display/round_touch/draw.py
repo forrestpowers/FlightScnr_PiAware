@@ -189,8 +189,6 @@ def draw_timeout_ring(surface: pygame.Surface, remaining_fraction: float) -> Non
     width = max(2, theme.s(3))
     r = theme.VISIBLE_RADIUS - width // 2 - theme.s(2)
 
-    pygame.draw.circle(surface, theme.SWEEP_TRAIL, (cx, cy), r, width)
-
     if remaining_fraction >= 0.999:
         pygame.draw.circle(surface, theme.SWEEP, (cx, cy), r, width)
         return
