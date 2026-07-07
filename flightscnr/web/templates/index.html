@@ -70,6 +70,9 @@
         font-weight:600;background:#3a2808;color:#ffc866;border:1px solid #6a4a12}
         .update-badge.ok{background:#0f2a18;color:#8dffb0;border-color:#1a9c3c}
         .update-ver{font-size:.82rem;color:var(--muted);margin:.15rem 0}
+        .btn-danger{background:#4a1515;border-color:#7a2222}
+        .btn-danger:hover{background:#5c1a1a}
+        .system-card .body{padding-top:.75rem}
     </style>
 </head>
 <body>
@@ -284,6 +287,18 @@
                 <button class="btn btn-primary hidden" id="btn-update-now" type="button">Update Now</button>
             </div>
             <div id="updates-status" class="status"></div>
+        </div>
+    </details>
+
+    <details class="card system-card">
+        <summary><span class="ico">&#9881;</span>System<span class="sum">power</span><span class="chev">&#9656;</span></summary>
+        <div class="body">
+            <p class="hint">Restart or power off this Raspberry Pi. The display and portal will go offline.</p>
+            <div class="track-row" style="margin-top:.55rem">
+                <button class="btn" id="btn-reboot" type="button">Reboot</button>
+                <button class="btn btn-danger" id="btn-shutdown" type="button">Shutdown</button>
+            </div>
+            <div id="system-status" class="status"></div>
         </div>
     </details>
 
@@ -783,8 +798,29 @@ async function searchRoute() {
     }
 }
 
+async function requestSystemAction(action) {
+    const labels = { reboot: "reboot", shutdown: "shut down" };
+    const label = labels[action] || action;
+    if (!confirm(`Are you sure you want to ${label} this Raspberry Pi?`)) {
+        return;
+    }
+    clearStatus("system-status");
+    $("btn-reboot").disabled = true;
+    $("btn-shutdown").disabled = true;
+    try {
+        const data = await jsonFetch(`/system/${action}`, { method: "POST" });
+        showStatus("system-status", data.message || `${label} scheduled.`);
+    } catch (e) {
+        showStatus("system-status", e.message, true);
+        $("btn-reboot").disabled = false;
+        $("btn-shutdown").disabled = false;
+    }
+}
+
 $("btn-check-updates").addEventListener("click", checkUpdates);
 $("btn-update-now").addEventListener("click", applyUpdate);
+$("btn-reboot").addEventListener("click", () => requestSystemAction("reboot"));
+$("btn-shutdown").addEventListener("click", () => requestSystemAction("shutdown"));
 $("btn-radar").addEventListener("click", saveRadar);
 $("btn-display").addEventListener("click", saveDisplay);
 $("btn-offhours").addEventListener("click", saveOffHours);

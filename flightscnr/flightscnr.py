@@ -34,7 +34,7 @@ def validate_config():
     else:
         errors.append("FR24_API_KEY")
         logger.warning(
-            "  ⚠ FR24_API_KEY is NOT SET — ADS-B-only mode "
+            "  ⚠ FR24_API_KEY is NOT SET — adsb.fi-only mode "
             "(no routes, flight details, or tracked flights)"
         )
 

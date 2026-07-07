@@ -30,11 +30,14 @@ except ImportError:
 
 FOOTER_BUTTONS = ("pin", "radar")
 
-# Push progress bar, stats, and footer lower; header (logo / route / type) stays up.
+# Push footer lower; keep stats block tight under the progress bar.
 _TRACKED_FOOTER_Y_OFFSET = theme.s(25)
 _TRACKED_FOOTER_BUTTON_SIZE = theme.s(46)
 _TRACKED_FOOTER_BUTTON_GAP = theme.s(25)
-_TRACKED_LOWER_BLOCK_Y_OFFSET = theme.s(18)
+# Visual plane size vs layout row height are separate so the icon can be large
+# without pushing LIVE / ETA / ticker rows off the 720×720 panel.
+_TRACKED_PROGRESS_PLANE_SIZE = theme.s(36)
+_TRACKED_PROGRESS_ROW_H = theme.s(16)
 
 _pinned = False
 
@@ -409,6 +412,18 @@ def _ticker_parts(data) -> list[str]:
     return parts
 
 
+def _format_vertical_speed(vs) -> str | None:
+    if vs is None:
+        return None
+    try:
+        rate = int(vs)
+    except (TypeError, ValueError):
+        return None
+    if abs(rate) <= 64:
+        return None
+    return f"{rate:+d} fpm"
+
+
 def _telemetry_parts(data) -> list[str]:
     parts: list[str] = []
     alt_str = aircraft.format_altitude(data.get("altitude"))
@@ -419,6 +434,10 @@ def _telemetry_parts(data) -> list[str]:
         elif vs < -64:
             alt_str += " ↓"
         parts.append(alt_str)
+
+    vs_str = _format_vertical_speed(data.get("vertical_speed"))
+    if vs_str:
+        parts.append(vs_str)
 
     speed_str = common.format_speed(data.get("ground_speed"))
     if speed_str:
@@ -562,12 +581,13 @@ def _draw_aircraft_type(surface, data, y: int, font) -> int:
 
 
 def _draw_progress_bar(surface, data, y: int) -> int:
+    plane_size = _TRACKED_PROGRESS_PLANE_SIZE
+    row_h = _TRACKED_PROGRESS_ROW_H
     bar_h = theme.s(5)
-    icon_pad = theme.s(36)
-    half_w = draw.circle_half_width_at_row(y, bar_h + icon_pad * 2)
+    half_w = draw.circle_half_width_at_row(y + row_h // 2, row_h)
     bar_w = max(theme.s(80), half_w * 2 - theme.s(16))
     x0 = theme.CENTER_X - bar_w // 2
-    bar_y = y + icon_pad
+    bar_y = y + (row_h - bar_h) // 2
     bar_rect = pygame.Rect(x0, bar_y, bar_w, bar_h)
     pygame.draw.rect(surface, theme.GRID, bar_rect, 1)
 
@@ -591,11 +611,13 @@ def _draw_progress_bar(surface, data, y: int) -> int:
     margin = theme.s(6)
     usable = max(1, bar_w - margin * 2)
     plane_x = x0 + margin + int(usable * progress)
-    plane_y = bar_y + bar_h // 2
+    plane_y = y + row_h // 2
     plane_color = theme.AIRCRAFT if is_live else theme.TAG_ALT_DESCEND
-    aircraft.draw_progress_plane(surface, plane_x, plane_y, plane_color, flight=data)
+    aircraft.draw_progress_plane(
+        surface, plane_x, plane_y, plane_color, flight=data, size=plane_size
+    )
 
-    return bar_y + bar_h + icon_pad
+    return y + row_h + theme.s(4)
 
 
 def _draw_empty(surface, top: int, bottom: int):
@@ -695,7 +717,6 @@ def draw_tracked(
     y = common.draw_logo(surface, tracked_data, y, logo_h=theme.s(30))
     y = _draw_route_header(surface, tracked_data, y, title_font, body_font)
     y = _draw_aircraft_type(surface, tracked_data, y, detail_font)
-    y += _TRACKED_LOWER_BLOCK_Y_OFFSET
     if not tracked_data.get("is_scheduled"):
         y = _draw_progress_bar(surface, tracked_data, y)
         y += theme.s(4)

@@ -606,5 +606,19 @@ def updates_apply():
     return jsonify(updater.start_update())
 
 
+@app.post("/system/reboot")
+def system_reboot():
+    from utilities import system_control
+
+    return jsonify(system_control.request_reboot())
+
+
+@app.post("/system/shutdown")
+def system_shutdown():
+    from utilities import system_control
+
+    return jsonify(system_control.request_shutdown())
+
+
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=WEB_PORT, debug=False)

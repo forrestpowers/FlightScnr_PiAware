@@ -74,7 +74,7 @@ def draw_plane_icon(surface, cx, cy, heading_deg, color, compact=False, flight=N
     _draw_silhouette(surface, cx, cy, heading_deg, color, scale)
 
 
-def draw_progress_plane(surface, cx, cy, color, flight=None):
+def draw_progress_plane(surface, cx, cy, color, flight=None, *, size: int | None = None):
     """Progress-bar marker — categorized icon when available, nose points right."""
     from display.round_touch import aircraft_type_icons
 
@@ -84,17 +84,17 @@ def draw_progress_plane(surface, cx, cy, color, flight=None):
         if not flight_dict.get("plane"):
             flight_dict["plane"] = flight_dict.get("aircraft_type") or ""
 
-    size = theme.s(80)
+    side = size if size is not None else theme.s(22)
     if aircraft_type_icons.draw_icon(
         surface,
         flight_dict,
         (int(cx), int(cy)),
         90.0,
         color,
-        size=size,
+        size=side,
     ):
         return
-    scale = size / 26.0
+    scale = side / 26.0
     _draw_silhouette(surface, cx, cy, 90, color, scale)
 
 

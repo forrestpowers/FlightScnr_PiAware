@@ -267,7 +267,7 @@ def _draw_status(surface, flights):
             min_line = f"Min height: {settings.min_height_ft()} ft"
         except ImportError:
             min_line = ""
-        lines = [location_status(), "Waiting for ADS-B / FR24…"]
+        lines = [location_status(), "Waiting for adsb.fi / FR24…"]
         if min_line:
             lines.insert(1, min_line)
         color = theme.HINT
