@@ -34,7 +34,7 @@ setup_paths() {
     REPO_ROOT="$(cd "$(dirname "$0")" && pwd)"
     SETUP_DIR="$REPO_ROOT/flightscnr/setup"
     APP_DIR="$REPO_ROOT/flightscnr"
-    VENV_DIR="$REPO_ROOT/.venv"
+    VENV_DIR="$REPO_ROOT/flightscnr-venv"
 
     if [ -n "${SUDO_USER:-}" ] && [ "$SUDO_USER" != "root" ]; then
         REPO_OWNER="$SUDO_USER"
@@ -268,6 +268,7 @@ fix_repo_permissions() {
     find "$REPO_ROOT" -type d -exec chmod 755 {} +
     find "$REPO_ROOT" -type f -exec chmod 644 {} +
     chmod 755 "$REPO_ROOT/install-pi.sh"
+    chmod 755 "$SETUP_DIR/portal-update.sh" 2>/dev/null || true
     chmod 755 "$VENV_DIR/bin/"* 2>/dev/null || true
     log_ok "Repo owned by $REPO_OWNER"
 }
@@ -281,6 +282,31 @@ start_service() {
     else
         echo "    ✗ Service failed to start. Check: sudo journalctl -u $SERVICE_NAME -n 30" >&2
         return 1
+    fi
+}
+
+install_update_sudoers() {
+    local src="$SETUP_DIR/sudoers-flightscnr-update"
+    local dest="/etc/sudoers.d/flightscnr-update"
+    local update_script="$SETUP_DIR/portal-update.sh"
+
+    if [ ! -f "$src" ]; then
+        log_warn "sudoers template missing — portal updates may require manual sudo"
+        return 0
+    fi
+
+    log_step "Portal update permissions"
+    chmod 0755 "$update_script"
+    sed \
+        -e "s|__REPO_OWNER__|$REPO_OWNER|g" \
+        -e "s|__UPDATE_SCRIPT__|$update_script|g" \
+        "$src" > "$dest"
+    chmod 0440 "$dest"
+    if visudo -cf "$dest" >/dev/null 2>&1; then
+        log_ok "Installed $dest (passwordless portal updates for $REPO_OWNER)"
+    else
+        log_warn "sudoers validation failed — removed $dest"
+        rm -f "$dest"
     fi
 }
 
@@ -320,6 +346,7 @@ cmd_install() {
     setup_data_dir
     setup_env_file
     install_systemd_service
+    install_update_sudoers
     fix_repo_permissions
 
     if [ "$no_start" -eq 0 ]; then

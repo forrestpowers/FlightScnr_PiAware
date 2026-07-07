@@ -14,8 +14,9 @@ dist/
 build/
 *.egg
 .pytest_cache/
-.venv/
+flightscnr-venv/
 venv/
+.venv/
 env/
 
 # IDE

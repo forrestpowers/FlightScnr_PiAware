@@ -56,7 +56,7 @@ sudo bash install-pi.sh
 | `/etc/flightscnr.env` | Systemd environment (never overwritten by install) |
 | `/var/lib/flightscnr/secrets.json` | API keys saved from the web portal |
 | `/var/lib/flightscnr/` | Runtime data, maps, web portal state |
-| `.venv/` | Python virtualenv (refreshed on install) |
+| `flightscnr-venv/` | Python packages for this app (created by `install-pi.sh`) |
 | `logo/` | Extracted from `logo.zip` on install |
 | `flightscnr/airlines.json` etc. | Downloaded on first app run |
 

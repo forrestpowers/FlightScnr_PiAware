@@ -64,6 +64,12 @@
         .wifi-note{margin-top:.6rem}
         .foot{margin:1rem 0 .2rem}
         .hidden{display:none}
+        .update-card .body{padding-top:.75rem}
+        .update-row{display:flex;flex-wrap:wrap;gap:.5rem;align-items:center;margin:.35rem 0 .6rem}
+        .update-badge{display:inline-block;padding:.2rem .55rem;border-radius:999px;font-size:.75rem;
+        font-weight:600;background:#3a2808;color:#ffc866;border:1px solid #6a4a12}
+        .update-badge.ok{background:#0f2a18;color:#8dffb0;border-color:#1a9c3c}
+        .update-ver{font-size:.82rem;color:var(--muted);margin:.15rem 0}
     </style>
 </head>
 <body>
@@ -78,8 +84,8 @@
             <input id="radar_center" type="text" autocomplete="off" placeholder="37.620000, -122.370000">
             <div class="row2">
                 <div>
-                    <label for="range_select">Range</label>
-                    <select id="range_select"></select>
+                    <label for="range_value">Range</label>
+                    <input id="range_value" type="text" inputmode="decimal" autocomplete="off" placeholder="30">
                 </div>
                 <div>
                     <label for="dist_units">Distance units</label>
@@ -90,6 +96,7 @@
                     </select>
                 </div>
             </div>
+            <p class="hint" id="range_hint"></p>
             <label for="min_height">Min altitude floor (ft, 0 = off)</label>
             <select id="min_height">
                 <option value="0">0 (off)</option>
@@ -262,6 +269,24 @@
         </div>
     </details>
 
+    <details class="card update-card">
+        <summary><span class="ico">&#8635;</span>Updates<span class="sum">version, install</span><span class="chev">&#9656;</span></summary>
+        <div class="body">
+            <div class="update-row">
+                <span id="update-badge" class="update-badge ok hidden">Up to date</span>
+                <span id="update-available-badge" class="update-badge hidden">Update available</span>
+            </div>
+            <p class="update-ver" id="update-local">Installed version: checking…</p>
+            <p class="update-ver" id="update-remote">Latest on GitHub: checking…</p>
+            <p class="hint" id="update-message"></p>
+            <div class="track-row" style="margin-top:.55rem">
+                <button class="btn" id="btn-check-updates" type="button">Check Updates</button>
+                <button class="btn btn-primary hidden" id="btn-update-now" type="button">Update Now</button>
+            </div>
+            <div id="updates-status" class="status"></div>
+        </div>
+    </details>
+
     <p class="wifi-note">Wi-Fi credentials are managed separately in the setup portal.</p>
     <p class="foot">
         <a href="/stats">Statistics</a> ·
@@ -273,6 +298,10 @@
 
 <script>
 let pendingCallsign = "";
+let currentScaleIndex = 1;
+let rangePresetsMi = [2, 3, 5, 8, 10, 20, 30];
+const STATUTE_MILE_KM = 1.609344;
+const NM_PER_KM = 1 / 1.852;
 const $ = (id) => document.getElementById(id);
 
 function showStatus(id, msg, error = false) {
@@ -302,6 +331,158 @@ function applyKeyHints(keys) {
     });
 }
 
+function rangeValueToKm(value, units) {
+    if (units === "mi") return value * STATUTE_MILE_KM;
+    if (units === "nm") return value * 1.852;
+    return value;
+}
+
+function rangeLabelKmForIndex(index) {
+    const idx = Math.max(0, Math.min(index, rangePresetsMi.length - 1));
+    return rangePresetsMi[idx] * STATUTE_MILE_KM;
+}
+
+function snapRangeIndex(value, units) {
+    const targetKm = rangeValueToKm(value, units);
+    let bestIdx = 0;
+    let bestDiff = Infinity;
+    for (let i = 0; i < rangePresetsMi.length; i += 1) {
+        const diff = Math.abs(rangeLabelKmForIndex(i) - targetKm);
+        if (diff < bestDiff) {
+            bestDiff = diff;
+            bestIdx = i;
+        }
+    }
+    return bestIdx;
+}
+
+function formatRangeDisplay(index, units) {
+    const labelKm = rangeLabelKmForIndex(index);
+    let value;
+    if (units === "mi") value = labelKm / STATUTE_MILE_KM;
+    else if (units === "nm") value = labelKm * NM_PER_KM;
+    else value = labelKm;
+    if (units === "km" && value >= 10) return String(Math.round(value));
+    if ((units === "mi" || units === "nm") && Math.abs(value - Math.round(value)) < 0.05) {
+        return String(Math.round(value));
+    }
+    return value.toFixed(1);
+}
+
+function updateRangeHint(presetsMi) {
+    if (presetsMi && presetsMi.length) rangePresetsMi = presetsMi;
+    const list = rangePresetsMi.join(", ");
+    $("range_hint").textContent =
+        `Snaps to nearest preset when saved: ${list} mi (converted for km/nm).`;
+}
+
+function refreshRangeInput() {
+    $("range_value").value = formatRangeDisplay(currentScaleIndex, $("dist_units").value);
+}
+
+function snapRangeInputPreview() {
+    const raw = $("range_value").value.trim();
+    if (!raw) return;
+    const value = Number(raw);
+    if (!Number.isFinite(value) || value <= 0) return;
+    currentScaleIndex = snapRangeIndex(value, $("dist_units").value);
+    refreshRangeInput();
+}
+
+let updatePollTimer = null;
+
+function formatVersionLine(prefix, info) {
+    if (!info) return `${prefix}: unavailable`;
+    if (info.release) {
+        const bits = [`${prefix}: ${info.release}`];
+        if (info.commit_short) bits.push(`(${info.commit_short})`);
+        return bits.join(" ");
+    }
+    if (!info.commit_short) return `${prefix}: unavailable`;
+    const bits = [`${prefix}: ${info.describe || info.commit_short}`];
+    if (info.branch) bits.push(`(${info.branch})`);
+    return bits.join(" ");
+}
+
+function applyUpdateInfo(data) {
+    const local = data.local || {};
+    const remote = data.remote || {};
+    const running = !!data.update_running;
+    const available = !!data.update_available && !running;
+
+    $("update-local").textContent = formatVersionLine("Installed", local);
+    if (remote.release_tag) {
+        $("update-remote").textContent =
+            `Latest release: ${remote.release_tag}${remote.commit_short ? ` (${remote.commit_short})` : ""}`;
+    } else if (remote.commit_short) {
+        $("update-remote").textContent =
+            `${formatVersionLine("Latest on GitHub", remote)}`;
+    } else {
+        $("update-remote").textContent = "Latest on GitHub: unavailable";
+    }
+
+    $("update-message").textContent = data.message || "";
+    $("update-badge").classList.toggle("hidden", available || running);
+    $("update-available-badge").classList.toggle("hidden", !available);
+    $("btn-update-now").classList.toggle("hidden", !available);
+    $("btn-check-updates").disabled = running;
+    $("btn-update-now").disabled = running;
+
+    if (running) {
+        $("update-available-badge").classList.add("hidden");
+        $("btn-update-now").classList.add("hidden");
+    }
+}
+
+async function checkUpdates() {
+    clearStatus("updates-status");
+    $("btn-check-updates").disabled = true;
+    try {
+        const data = await jsonFetch("/updates/json");
+        applyUpdateInfo(data);
+        if (data.update_running) startUpdatePoll();
+    } catch (e) {
+        showStatus("updates-status", e.message, true);
+    } finally {
+        $("btn-check-updates").disabled = false;
+    }
+}
+
+function startUpdatePoll() {
+    if (updatePollTimer) return;
+    showStatus("updates-status", "Update in progress. The page will reconnect when the service restarts…");
+    updatePollTimer = setInterval(async () => {
+        try {
+            const data = await jsonFetch("/updates/status");
+            if (!data.update_running) {
+                clearInterval(updatePollTimer);
+                updatePollTimer = null;
+                await checkUpdates();
+                showStatus("updates-status", "Update finished. Refresh if the display did not restart.");
+            }
+        } catch (_) {
+            // Service restart drops the connection — keep polling.
+        }
+    }, 4000);
+}
+
+async function applyUpdate() {
+    clearStatus("updates-status");
+    if (!confirm("Install the latest update and restart FlightScnr? Your settings and API keys are preserved.")) {
+        return;
+    }
+    $("btn-update-now").disabled = true;
+    try {
+        const data = await jsonFetch("/updates/apply", { method: "POST" });
+        showStatus("updates-status", data.message || "Update started.");
+        startUpdatePoll();
+        await checkUpdates();
+    } catch (e) {
+        showStatus("updates-status", e.message, true);
+        $("btn-update-now").disabled = false;
+    }
+}
+
 async function loadAll() {
     try {
         const loc = await jsonFetch("/location/json");
@@ -310,16 +491,10 @@ async function loadAll() {
 
     try {
         const r = await jsonFetch("/radar/json");
-        const range = $("range_select");
-        range.innerHTML = "";
-        (r.scale_options || []).forEach((opt) => {
-            const el = document.createElement("option");
-            el.value = String(opt.index);
-            el.textContent = opt.label;
-            range.appendChild(el);
-        });
+        currentScaleIndex = Number(r.scale_index ?? 1);
         $("dist_units").value = r.distance_units || "km";
-        $("range_select").value = String(r.scale_index || 0);
+        updateRangeHint(r.range_presets_mi);
+        refreshRangeInput();
         $("min_height").value = String(r.min_height_ft ?? 1000);
         const theme = $("radar_theme");
         theme.innerHTML = "";
@@ -398,7 +573,7 @@ async function saveRadar() {
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
                 distance_units: $("dist_units").value,
-                scale_index: Number($("range_select").value),
+                range_value: $("range_value").value.trim(),
                 min_height_ft: Number($("min_height").value),
                 theme_index: Number($("radar_theme").value),
                 show_compass_rose: $("show_compass").checked,
@@ -608,6 +783,8 @@ async function searchRoute() {
     }
 }
 
+$("btn-check-updates").addEventListener("click", checkUpdates);
+$("btn-update-now").addEventListener("click", applyUpdate);
 $("btn-radar").addEventListener("click", saveRadar);
 $("btn-display").addEventListener("click", saveDisplay);
 $("btn-offhours").addEventListener("click", saveOffHours);
@@ -621,8 +798,13 @@ $("btn-route").addEventListener("click", searchRoute);
 $("btn-keys-save").addEventListener("click", () => saveApiKeys(false));
 $("btn-keys-restart").addEventListener("click", () => saveApiKeys(true));
 $("night_mode").addEventListener("change", toggleDimRow);
+$("dist_units").addEventListener("change", refreshRangeInput);
+$("range_value").addEventListener("blur", snapRangeInputPreview);
 
-document.addEventListener("DOMContentLoaded", loadAll);
+document.addEventListener("DOMContentLoaded", () => {
+    loadAll();
+    checkUpdates();
+});
 </script>
 </body>
 </html>

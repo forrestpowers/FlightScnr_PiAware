@@ -123,19 +123,52 @@ def _load():
 
 
 _state = _load()
+try:
+    _settings_mtime = os.path.getmtime(SETTINGS_PATH)
+except OSError:
+    _settings_mtime = None
+
+
+def _settings_snapshot(state: dict) -> tuple:
+    """Comparable tuple of portal-synced settings."""
+    return (
+        state.get("scale_index"),
+        state.get("distance_units"),
+        state.get("theme_index"),
+        state.get("show_compass_rose"),
+        state.get("show_sweep"),
+        state.get("min_height_ft"),
+        state.get("brightness_percent"),
+        state.get("auto_idle_clock"),
+        state.get("flight_detail_timeout_s"),
+        state.get("clock_timeout_s"),
+        state.get("clock_12hr"),
+        state.get("auto_timezone"),
+    )
 
 
 def reload() -> bool:
     """Reload settings from disk if file changed externally."""
     global _state, _settings_mtime
     try:
-        current = os.path.getmtime(SETTINGS_PATH)
-    except OSError:
-        current = None
-    if current == _settings_mtime:
+        with open(SETTINGS_PATH, encoding="utf-8") as f:
+            data = json.load(f)
+    except (OSError, json.JSONDecodeError, TypeError):
         return False
+
+    incoming = {**_defaults, **data}
+    if _settings_snapshot(incoming) == _settings_snapshot(_state):
+        try:
+            _settings_mtime = os.path.getmtime(SETTINGS_PATH)
+        except OSError:
+            pass
+        return False
+
     _state = _load()
-    _settings_mtime = current
+    try:
+        _settings_mtime = os.path.getmtime(SETTINGS_PATH)
+    except OSError:
+        _settings_mtime = None
     _sync_config_min_height()
     # Re-apply runtime palette when theme changes are saved externally
     # (e.g. from the web portal process).

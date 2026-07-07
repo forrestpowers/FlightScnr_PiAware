@@ -226,7 +226,7 @@ def location_status() -> str:
 TEMPERATURE_LOCATION = _require("TEMPERATURE_LOCATION")
 if not TEMPERATURE_LOCATION and location_configured():
     TEMPERATURE_LOCATION = f"{LOCATION_HOME[0]},{LOCATION_HOME[1]}"
-TEMPERATURE_UNITS = os.environ.get("TEMPERATURE_UNITS", "metric")
+TEMPERATURE_UNITS = os.environ.get("TEMPERATURE_UNITS", "imperial")
 FORECAST_DAYS = int(os.environ.get("FORECAST_DAYS", "3"))
 
 # --- Web portal ---

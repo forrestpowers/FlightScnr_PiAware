@@ -1,8 +1,8 @@
 """About / boot splash screen."""
 
 from display.round_touch import draw, nav, theme
+from version import APP_VERSION
 
-VERSION = "1.0.0"
 FOOTER_BUTTONS = ("radar",)
 
 
@@ -20,14 +20,14 @@ def draw_details(surface, boot_splash=False, scroll_offset: int = 0) -> int:
 
     if boot_splash:
         y = theme.CENTER_Y - theme.s(60)
-        y = draw.draw_center_line(surface, f"FlightScnr Pi v{VERSION}", y, body_font, theme.LABEL)
+        y = draw.draw_center_line(surface, f"FlightScnr Pi v{APP_VERSION}", y, body_font, theme.LABEL)
         y = draw.draw_center_line(surface, "UI by FlightScnr", y, body_font, theme.MUTED)
         draw.draw_center_line(surface, "Yash Mulgaonkar", y, body_font, theme.MUTED)
         return 0
 
     nav.draw_breadcrumb(surface, ["Radar", "About"])
     lines = [
-        f"FlightScnr Pi v{VERSION}",
+        f"FlightScnr Pi v{APP_VERSION}",
         "UI by FlightScnr",
         "Yash Mulgaonkar",
     ]

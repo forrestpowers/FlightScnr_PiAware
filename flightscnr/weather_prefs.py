@@ -11,18 +11,7 @@ logger = logging.getLogger(__name__)
 DATA_DIR = os.environ.get("FLIGHTSCNR_DATA_DIR", "/var/lib/flightscnr")
 PREFS_PATH = os.path.join(DATA_DIR, "weather_prefs.json")
 
-_defaults: dict = {"temperature_units": None}
-
-
-def _env_default() -> str:
-    try:
-        from config import TEMPERATURE_UNITS
-
-        if TEMPERATURE_UNITS in ("metric", "imperial"):
-            return TEMPERATURE_UNITS
-    except ImportError:
-        pass
-    return "metric"
+_defaults: dict = {"temperature_units": "imperial"}
 
 
 def normalize_units(value: str | None) -> str:
@@ -72,7 +61,7 @@ def temperature_units() -> str:
     stored = _state.get("temperature_units")
     if stored in ("metric", "imperial"):
         return stored
-    return _env_default()
+    return str(_defaults.get("temperature_units", "imperial"))
 
 
 def unit_symbol() -> str:

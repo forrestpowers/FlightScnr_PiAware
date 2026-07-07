@@ -21,7 +21,7 @@ Environment=SDL_VIDEODRIVER=x11
 ExecStartPre=/bin/bash -c 'for i in $(seq 1 90); do [ -S /tmp/.X11-unix/X0 ] && [ -f "${XAUTHORITY}" ] && exit 0; sleep 1; done; echo "X11 not ready after 90s"; exit 1'
 ExecStartPre=/bin/bash -c 'mkdir -p /var/lib/flightscnr/maps'
 
-ExecStart=__REPO_DIR__/.venv/bin/python3 __REPO_DIR__/flightscnr/flightscnr.py
+ExecStart=__REPO_DIR__/flightscnr-venv/bin/python3 __REPO_DIR__/flightscnr/flightscnr.py
 Restart=always
 RestartSec=10
 TimeoutStopSec=15

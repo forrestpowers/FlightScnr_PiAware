@@ -9,6 +9,7 @@ def _band(miles: float) -> dict:
 
 
 SCALE_BANDS = [_band(m) for m in (2, 3, 5, 8, 10, 20, 30)]
+PRESET_STATUTE_MILES = tuple(m for m in (2, 3, 5, 8, 10, 20, 30))
 
 _active_index = 1
 
@@ -76,6 +77,55 @@ def format_active_tag(units: str = "km") -> str:
 def format_band_tag(index: int, units: str = "km") -> str:
     idx = max(0, min(int(index), len(SCALE_BANDS) - 1))
     return format_scale_tag(SCALE_BANDS[idx]["label_km"], units)
+
+
+def value_to_km(value: float, units: str = "mi") -> float:
+    units = (units or "km").lower()
+    if units == "mi":
+        return value * STATUTE_MILE_KM
+    if units == "nm":
+        return value * 1.852
+    return value
+
+
+def index_for_value(value: float, units: str = "mi") -> int:
+    """Snap to the nearest scale band for a distance in the given units."""
+    target_km = value_to_km(float(value), units)
+    best_idx = 0
+    best_diff = float("inf")
+    for i, band in enumerate(SCALE_BANDS):
+        diff = abs(band["label_km"] - target_km)
+        if diff < best_diff:
+            best_diff = diff
+            best_idx = i
+    return best_idx
+
+
+def display_value_for_index(index: int, units: str = "mi") -> float:
+    """Numeric range for portal display in the given units."""
+    idx = max(0, min(int(index), len(SCALE_BANDS) - 1))
+    label_km = SCALE_BANDS[idx]["label_km"]
+    units = (units or "km").lower()
+    if units == "mi":
+        return label_km / STATUTE_MILE_KM
+    if units == "nm":
+        return label_km * NM_PER_KM
+    return label_km
+
+
+def format_display_value(index: int, units: str = "mi") -> str:
+    """Format range for the portal text box."""
+    value = display_value_for_index(index, units)
+    units = (units or "km").lower()
+    if units == "km" and value >= 10:
+        return str(int(round(value)))
+    if units in ("mi", "nm") and abs(value - round(value)) < 0.05:
+        return str(int(round(value)))
+    return f"{value:.1f}"
+
+
+def preset_labels_mi() -> str:
+    return ", ".join(str(m) for m in PRESET_STATUTE_MILES)
 
 
 def index_for_radius_nm(radius_nm: float) -> int:

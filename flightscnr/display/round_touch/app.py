@@ -234,6 +234,15 @@ class RoundTouchDisplay:
     def _note_activity(self):
         self._secondary_activity = time.time()
 
+    def _idle_clock_holds_screen(self) -> bool:
+        """Auto-idle clock should keep clock up while no in-range aircraft."""
+        return (
+            self._auto_idle_clock
+            and settings.auto_idle_clock_enabled()
+            and self.screen in (SCREEN_CLOCK, SCREEN_CLOCK_SETTINGS, SCREEN_FORECAST)
+            and radar.visible_in_range_count(self.flights) == 0
+        )
+
     def _return_to_radar(self):
         self._fatal_error = None
         if self.screen == SCREEN_TRACKED:
@@ -625,6 +634,8 @@ class RoundTouchDisplay:
             and off_hours.force_clock_enabled()
         ):
             return
+        if self._idle_clock_holds_screen():
+            return
         if self.screen == SCREEN_RADAR:
             return
         if self.screen == SCREEN_TRACKED and tracked.is_pinned():
@@ -669,10 +680,13 @@ class RoundTouchDisplay:
                     self._safe_draw()
             else:
                 self._radar_visible_since = time.time()
-        elif self._auto_idle_clock and self.screen in (SCREEN_CLOCK, SCREEN_CLOCK_SETTINGS, SCREEN_FORECAST):
-            if radar.visible_in_range_count(self.flights) > 0:
-                self._return_to_radar()
-                self._safe_draw()
+        elif (
+            self._auto_idle_clock
+            and self.screen in (SCREEN_CLOCK, SCREEN_CLOCK_SETTINGS, SCREEN_FORECAST)
+            and radar.visible_in_range_count(self.flights) > 0
+        ):
+            self._return_to_radar()
+            self._safe_draw()
 
     def _tick_off_hours_clock(self):
         from display.round_touch import off_hours
@@ -684,6 +698,13 @@ class RoundTouchDisplay:
         if self.screen not in (SCREEN_CLOCK, SCREEN_CLOCK_SETTINGS, SCREEN_FORECAST):
             self._open_screen(SCREEN_CLOCK)
             self._safe_draw()
+
+    def _apply_reloaded_settings(self):
+        """Apply settings written by another process (e.g. web portal)."""
+        scale.select(settings.scale_index())
+        map_bg.request_background()
+        self._apply_brightness()
+        self._safe_draw()
 
     def _maybe_reload_location(self):
         try:
@@ -793,9 +814,7 @@ class RoundTouchDisplay:
 
                 if now - self._last_settings_reload >= 0.5:
                     if settings.reload():
-                        self._apply_brightness()
-                        if self.screen in (SCREEN_CLOCK, SCREEN_CLOCK_SETTINGS, SCREEN_FORECAST, SCREEN_SETTINGS):
-                            self._safe_draw()
+                        self._apply_reloaded_settings()
                     self._last_settings_reload = now
 
                 if self._route_enrich_redraw and self.screen == SCREEN_FLIGHT:

@@ -482,15 +482,14 @@ def display_save():
 def radar_json():
     from display.round_touch import color_presets, scale, settings
 
-    options = [
-        {"index": i, "label": scale.format_band_tag(i, settings.distance_units())}
-        for i in range(len(scale.SCALE_BANDS))
-    ]
+    idx = settings.scale_index()
+    units = settings.distance_units()
     return jsonify(
         {
-            "distance_units": settings.distance_units(),
-            "scale_index": settings.scale_index(),
-            "scale_options": options,
+            "distance_units": units,
+            "scale_index": idx,
+            "range_value": scale.format_display_value(idx, units),
+            "range_presets_mi": list(scale.PRESET_STATUTE_MILES),
             "min_height_ft": settings.min_height_ft(),
             "theme_index": settings.theme_index(),
             "theme_options": list(color_presets.THEME_NAMES),
@@ -507,7 +506,20 @@ def radar_save():
     data = request.get_json(silent=True) or {}
     if "distance_units" in data:
         settings.set_distance_units(data.get("distance_units"))
-    if "scale_index" in data:
+    units = settings.distance_units()
+    if "range_value" in data:
+        raw = str(data.get("range_value", "")).strip()
+        try:
+            value = float(raw)
+        except ValueError:
+            return jsonify({"ok": False, "message": "Range must be a number."}), 400
+        if value <= 0:
+            return jsonify({"ok": False, "message": "Range must be greater than zero."}), 400
+        idx = scale.index_for_value(value, units)
+        settings.set_scale_index(idx)
+        scale.select(idx)
+        map_bg.request_background()
+    elif "scale_index" in data:
         settings.set_scale_index(int(data.get("scale_index")))
         scale.select(settings.scale_index())
         map_bg.request_background()
@@ -564,6 +576,34 @@ def off_hours_save():
 @app.get("/maps/<path:filename>")
 def maps(filename):
     return send_from_directory(MAPS_DIR, filename)
+
+
+@app.get("/updates/json")
+def updates_json():
+    from utilities import updater
+
+    return jsonify(updater.check_for_update())
+
+
+@app.post("/updates/check")
+def updates_check():
+    from utilities import updater
+
+    return jsonify(updater.check_for_update())
+
+
+@app.get("/updates/status")
+def updates_status():
+    from utilities import updater
+
+    return jsonify(updater.update_status())
+
+
+@app.post("/updates/apply")
+def updates_apply():
+    from utilities import updater
+
+    return jsonify(updater.start_update())
 
 
 if __name__ == "__main__":
