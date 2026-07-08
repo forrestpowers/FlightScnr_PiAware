@@ -589,7 +589,7 @@ def updates_json():
 def updates_check():
     from utilities import updater
 
-    return jsonify(updater.check_for_update())
+    return jsonify(updater.check_for_update(force=True))
 
 
 @app.get("/updates/status")

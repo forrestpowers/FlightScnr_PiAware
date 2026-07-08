@@ -210,6 +210,9 @@ def _write_remote_cache(remote: dict) -> None:
 
 
 def _merge_remote(*parts: dict) -> dict:
+    """Merge remote version hints, picking the highest release tag across sources."""
+    from version import ReleaseVersion, normalize_version
+
     merged = {
         "commit": "",
         "commit_short": "",
@@ -221,23 +224,68 @@ def _merge_remote(*parts: dict) -> dict:
         "repo": GITHUB_REPO,
         "source": "",
     }
+
+    best: ReleaseVersion | None = None
+    best_tag = ""
+    best_part: dict = {}
+
     for part in parts:
         if not part:
             continue
-        for key, value in part.items():
-            if value and not merged.get(key):
-                merged[key] = value
-        if part.get("source") and not merged["source"]:
-            merged["source"] = str(part["source"])
-    if merged["release_tag"] and not merged["release_name"]:
-        merged["release_name"] = merged["release_tag"]
+        tag = normalize_version(part.get("release_tag") or "")
+        if not tag:
+            continue
+        parsed = ReleaseVersion.parse(tag)
+        if parsed is None:
+            continue
+        if best is None or parsed > best:
+            best = parsed
+            best_tag = tag
+            best_part = part
+
+    if best_tag:
+        merged["release_tag"] = best_tag
+        merged["release_name"] = str(best_part.get("release_name") or best_tag)
+        merged["release_published"] = str(best_part.get("release_published") or "")
+        if best_part.get("source"):
+            merged["source"] = str(best_part["source"])
+
+    commit = ""
+    commit_date = ""
+    if best_part.get("commit"):
+        commit = str(best_part["commit"])
+        commit_date = str(best_part.get("commit_date") or "")
+    else:
+        for part in parts:
+            if part and part.get("source") == "git" and part.get("commit"):
+                commit = str(part["commit"])
+                break
+        if not commit:
+            for part in parts:
+                if part and part.get("source") == "github_api" and part.get("commit"):
+                    commit = str(part["commit"])
+                    commit_date = str(part.get("commit_date") or "")
+                    break
+
+    if commit:
+        merged["commit"] = commit
+        merged["commit_short"] = commit[:7]
+        if commit_date:
+            merged["commit_date"] = commit_date
+
+    if not merged["source"]:
+        for part in parts:
+            if part and part.get("source"):
+                merged["source"] = str(part["source"])
+                break
+
     return merged
 
 
-def remote_version_info() -> dict:
+def remote_version_info(*, force: bool = False) -> dict:
     cached, cached_ts = _read_remote_cache()
     age = time.time() - cached_ts
-    if cached and age < _REMOTE_CACHE_TTL_S:
+    if not force and cached and age < _REMOTE_CACHE_TTL_S:
         return dict(cached)
 
     owner, _, name = GITHUB_REPO.partition("/")
@@ -331,11 +379,11 @@ def update_running() -> bool:
     return status.get("state") == "running"
 
 
-def check_for_update() -> dict:
+def check_for_update(*, force: bool = False) -> dict:
     from version import compare_versions, normalize_version
 
     local = local_version_info()
-    remote = remote_version_info()
+    remote = remote_version_info(force=force)
     status = _read_status()
 
     local_release = normalize_version(local.get("release") or "")

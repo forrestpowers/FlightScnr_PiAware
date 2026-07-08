@@ -455,7 +455,7 @@ async function checkUpdates() {
     clearStatus("updates-status");
     $("btn-check-updates").disabled = true;
     try {
-        const data = await jsonFetch("/updates/json");
+        const data = await jsonFetch("/updates/check", { method: "POST" });
         applyUpdateInfo(data);
         if (data.update_running) startUpdatePoll();
     } catch (e) {
