@@ -21,6 +21,9 @@ STATUS_PATH = os.path.join(DATA_DIR, "update-status.json")
 LOCK_PATH = os.path.join(DATA_DIR, "update.lock")
 UPDATE_LOG_PATH = os.path.join(DATA_DIR, "update.log")
 GITHUB_TIMEOUT_S = 12
+_REMOTE_CACHE_PATH = os.path.join(DATA_DIR, "github-remote-cache.json")
+_REMOTE_CACHE_TTL_S = 30 * 60
+_REMOTE_CACHE_STALE_S = 24 * 3600
 
 
 def repo_root() -> str:
@@ -107,48 +110,170 @@ def _remote_commit_via_git() -> dict:
     }
 
 
+def _remote_latest_tag_via_git() -> dict:
+    """Latest semver tag from origin (works when GitHub API is rate-limited)."""
+    from version import ReleaseVersion, normalize_version
+
+    output = _run_git(["ls-remote", "--tags", "origin"])
+    if not output:
+        return {}
+
+    peeled: dict[str, str] = {}
+    tag_names: list[str] = []
+    for line in output.splitlines():
+        parts = line.split()
+        if len(parts) < 2:
+            continue
+        commit, ref = parts[0], parts[1]
+        if not ref.startswith("refs/tags/"):
+            continue
+        tag = ref[len("refs/tags/") :]
+        if tag.endswith("^{}"):
+            peeled[tag[:-3]] = commit
+        elif tag not in peeled:
+            tag_names.append(tag)
+
+    best: ReleaseVersion | None = None
+    best_tag = ""
+    for tag in tag_names:
+        parsed = ReleaseVersion.parse(tag)
+        if parsed is None:
+            continue
+        if best is None or parsed > best:
+            best = parsed
+            best_tag = normalize_version(tag)
+
+    if not best_tag:
+        return {}
+
+    commit = peeled.get(best_tag, "")
+    return {
+        "release_tag": best_tag,
+        "commit": commit,
+        "commit_short": commit[:7] if commit else "",
+        "branch": GITHUB_BRANCH,
+        "source": "git_tags",
+    }
+
+
+def _remote_via_raw_github() -> dict:
+    """Read VERSION from raw.githubusercontent.com (no REST API rate limit)."""
+    from version import normalize_version
+
+    owner, _, name = GITHUB_REPO.partition("/")
+    url = f"https://raw.githubusercontent.com/{owner}/{name}/{GITHUB_BRANCH}/VERSION"
+    try:
+        response = requests.get(
+            url,
+            timeout=GITHUB_TIMEOUT_S,
+            headers={"User-Agent": "FlightScnr-Pi-Updater"},
+        )
+        response.raise_for_status()
+        release = normalize_version(response.text)
+        if not release:
+            return {}
+        return {"release_tag": release, "source": "raw_github"}
+    except requests.RequestException as exc:
+        logger.warning("Raw GitHub VERSION fetch failed: %s", exc)
+        return {}
+
+
+def _read_remote_cache() -> tuple[dict, float]:
+    try:
+        with open(_REMOTE_CACHE_PATH, encoding="utf-8") as fh:
+            data = json.load(fh)
+        if not isinstance(data, dict):
+            return {}, 0.0
+        cached = data.get("remote")
+        ts = float(data.get("ts") or 0.0)
+        return (cached if isinstance(cached, dict) else {}), ts
+    except (OSError, json.JSONDecodeError, TypeError, ValueError):
+        return {}, 0.0
+
+
+def _write_remote_cache(remote: dict) -> None:
+    try:
+        os.makedirs(DATA_DIR, exist_ok=True)
+        tmp = _REMOTE_CACHE_PATH + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as fh:
+            json.dump({"ts": time.time(), "remote": remote}, fh, indent=2)
+        os.replace(tmp, _REMOTE_CACHE_PATH)
+    except OSError as exc:
+        logger.warning("Could not write remote update cache: %s", exc)
+
+
+def _merge_remote(*parts: dict) -> dict:
+    merged = {
+        "commit": "",
+        "commit_short": "",
+        "branch": GITHUB_BRANCH,
+        "release_tag": "",
+        "release_name": "",
+        "release_published": "",
+        "commit_date": "",
+        "repo": GITHUB_REPO,
+        "source": "",
+    }
+    for part in parts:
+        if not part:
+            continue
+        for key, value in part.items():
+            if value and not merged.get(key):
+                merged[key] = value
+        if part.get("source") and not merged["source"]:
+            merged["source"] = str(part["source"])
+    if merged["release_tag"] and not merged["release_name"]:
+        merged["release_name"] = merged["release_tag"]
+    return merged
+
+
 def remote_version_info() -> dict:
+    cached, cached_ts = _read_remote_cache()
+    age = time.time() - cached_ts
+    if cached and age < _REMOTE_CACHE_TTL_S:
+        return dict(cached)
+
     owner, _, name = GITHUB_REPO.partition("/")
     release = _github_get(f"/repos/{owner}/{name}/releases/latest")
     branch_commit = _github_get(f"/repos/{owner}/{name}/commits/{GITHUB_BRANCH}")
 
-    remote_commit = ""
-    remote_short = ""
-    published_at = ""
-    source = ""
+    api_remote: dict = {}
     if branch_commit:
         remote_commit = str(branch_commit.get("sha") or "")
-        remote_short = remote_commit[:7]
         commit_meta = branch_commit.get("commit") or {}
-        published_at = str(commit_meta.get("committer", {}).get("date") or "")
-        source = "github_api"
-
-    if not remote_commit:
-        git_remote = _remote_commit_via_git()
-        if git_remote:
-            remote_commit = git_remote.get("commit", "")
-            remote_short = git_remote.get("commit_short", "")
-            source = git_remote.get("source", "git")
-
-    release_tag = ""
-    release_name = ""
-    release_published = ""
+        api_remote = {
+            "commit": remote_commit,
+            "commit_short": remote_commit[:7],
+            "commit_date": str(commit_meta.get("committer", {}).get("date") or ""),
+            "source": "github_api",
+        }
     if release:
         release_tag = str(release.get("tag_name") or "")
-        release_name = str(release.get("name") or release_tag)
-        release_published = str(release.get("published_at") or "")
+        api_remote.update(
+            {
+                "release_tag": release_tag,
+                "release_name": str(release.get("name") or release_tag),
+                "release_published": str(release.get("published_at") or ""),
+            }
+        )
+        if not api_remote.get("source"):
+            api_remote["source"] = "github_api"
 
-    return {
-        "commit": remote_commit,
-        "commit_short": remote_short,
-        "branch": GITHUB_BRANCH,
-        "release_tag": release_tag,
-        "release_name": release_name,
-        "release_published": release_published,
-        "commit_date": published_at,
-        "repo": GITHUB_REPO,
-        "source": source,
-    }
+    git_branch = _remote_commit_via_git()
+    git_tags = _remote_latest_tag_via_git()
+    raw_version = _remote_via_raw_github()
+
+    remote = _merge_remote(api_remote, git_tags, git_branch, raw_version)
+    remote["branch"] = GITHUB_BRANCH
+    remote["repo"] = GITHUB_REPO
+
+    if remote.get("release_tag") or remote.get("commit"):
+        _write_remote_cache(remote)
+    elif cached and age < _REMOTE_CACHE_STALE_S:
+        logger.info("Using stale GitHub remote cache (API unreachable)")
+        return dict(cached)
+
+    return remote
 
 
 def _read_status() -> dict:
@@ -218,7 +343,10 @@ def check_for_update() -> dict:
 
     message = "Up to date."
     if not local.get("is_git_repo"):
-        message = "This install is not a git checkout — use install-pi.sh manually."
+        if remote_release:
+            message = "Up to date (install is not a git checkout — use install-pi.sh to update)."
+        else:
+            message = "This install is not a git checkout — use install-pi.sh manually."
     elif not remote.get("commit") and not remote_release:
         message = "Could not reach GitHub to check for updates."
     elif update_available:
