@@ -103,6 +103,8 @@ class RoundTouchDisplay:
         self.settings_page = info.PAGE_MAIN
         self.flights = []
         self.flight_index = 0
+        # Stable identity for the open detail page (index alone drifts as traffic changes).
+        self._selected_flight_id: str | None = None
         self._secondary_activity = time.time()
         self._boot_until = time.time() + BOOT_SPLASH_S
         self._last_clock_minute = -1
@@ -143,11 +145,75 @@ class RoundTouchDisplay:
             if self.overhead.processing:
                 return
             self.flights = self.overhead.peek_data()
+            if self.screen == SCREEN_FLIGHT:
+                self._sync_selected_flight_index()
         except Exception:
             logger.exception("Failed to refresh flight data")
 
+    @staticmethod
+    def _flight_identity(flight: dict | None) -> str | None:
+        """Stable key for a flight across radar refresh / distance re-sorts."""
+        if not flight:
+            return None
+        hex_id = (flight.get("icao_hex") or "").strip().upper()
+        if hex_id:
+            return f"hex:{hex_id}"
+        callsign = (flight.get("callsign") or flight.get("flight_number") or "").strip().upper()
+        if callsign:
+            return f"cs:{callsign}"
+        return None
+
     def _ordered_flights(self):
         return radar.flights_by_distance(self.flights)
+
+    def _sync_selected_flight_index(self) -> bool:
+        """Keep flight_index pointing at `_selected_flight_id` after list changes.
+
+        Returns True if the selected flight is still present.
+        """
+        ordered = self._ordered_flights()
+        if not ordered:
+            self.flight_index = 0
+            return False
+        selected_id = self._selected_flight_id
+        if selected_id:
+            for i, flight in enumerate(ordered):
+                if self._flight_identity(flight) == selected_id:
+                    self.flight_index = i
+                    return True
+        # Selected aircraft left coverage — keep a valid index, but clear the pin
+        # so we don't keep showing whoever now occupies the old slot forever.
+        self.flight_index = max(0, min(self.flight_index, len(ordered) - 1))
+        self._selected_flight_id = self._flight_identity(ordered[self.flight_index])
+        return False
+
+    def _select_flight_at_index(self, index: int, ordered: list | None = None) -> None:
+        ordered = ordered if ordered is not None else self._ordered_flights()
+        if not ordered:
+            self.flight_index = 0
+            self._selected_flight_id = None
+            return
+        self.flight_index = index % len(ordered)
+        self._selected_flight_id = self._flight_identity(ordered[self.flight_index])
+
+    def _select_flight(self, flight: dict, ordered: list | None = None) -> None:
+        ordered = ordered if ordered is not None else self._ordered_flights()
+        if not ordered:
+            self.flight_index = 0
+            self._selected_flight_id = self._flight_identity(flight)
+            return
+        selected_id = self._flight_identity(flight)
+        self._selected_flight_id = selected_id
+        if selected_id:
+            for i, candidate in enumerate(ordered):
+                if self._flight_identity(candidate) == selected_id:
+                    self.flight_index = i
+                    return
+        try:
+            self.flight_index = ordered.index(flight)
+        except ValueError:
+            self.flight_index = 0
+            self._selected_flight_id = self._flight_identity(ordered[0])
 
     def _present(self):
         rotation.present(self._display, self.surface)
@@ -253,6 +319,7 @@ class RoundTouchDisplay:
         self._auto_idle_clock = False
         self.screen = SCREEN_RADAR
         self.settings_page = info.PAGE_MAIN
+        self._selected_flight_id = None
         self._scroll.reset()
 
     def _set_settings_page(self, page: int):
@@ -348,6 +415,7 @@ class RoundTouchDisplay:
         self._safe_draw()
 
     def _flights_for_detail(self):
+        self._sync_selected_flight_index()
         ordered = self._ordered_flights()
         return [merge_route_enrichment(f, self._route_enrichment) for f in ordered]
 
@@ -355,6 +423,7 @@ class RoundTouchDisplay:
         """Fetch AirLabs route data for the open flight detail row (background)."""
         if self.screen != SCREEN_FLIGHT:
             return
+        self._sync_selected_flight_index()
         ordered = self._ordered_flights()
         if not ordered:
             return
@@ -385,10 +454,7 @@ class RoundTouchDisplay:
         ordered = self._ordered_flights()
         if not picked or not ordered:
             return False
-        try:
-            self.flight_index = ordered.index(picked)
-        except ValueError:
-            self.flight_index = 0
+        self._select_flight(picked, ordered)
         self._open_screen(SCREEN_FLIGHT)
         self._note_activity()
         self._maybe_enrich_flight_detail()
@@ -545,16 +611,17 @@ class RoundTouchDisplay:
             if tap and self._open_flight_at(tap[0], tap[1]):
                 self._safe_draw()
         elif tap and self.screen == SCREEN_FLIGHT:
+            self._sync_selected_flight_index()
             ordered = self._ordered_flights()
             action = flight_detail.tap_footer_action(tap[0], tap[1], ordered)
             if action == "prev" and ordered:
-                self.flight_index = (self.flight_index - 1) % len(ordered)
+                self._select_flight_at_index(self.flight_index - 1, ordered)
                 self._scroll.reset()
                 self._note_activity()
                 self._maybe_enrich_flight_detail()
                 self._safe_draw()
             elif action == "next" and ordered:
-                self.flight_index = (self.flight_index + 1) % len(ordered)
+                self._select_flight_at_index(self.flight_index + 1, ordered)
                 self._scroll.reset()
                 self._note_activity()
                 self._maybe_enrich_flight_detail()
