@@ -30,8 +30,8 @@ except ImportError:
 
 FOOTER_BUTTONS = ("pin", "radar")
 
-# Push footer lower; keep stats block tight under the progress bar.
-_TRACKED_FOOTER_Y_OFFSET = theme.s(25)
+# Extra nudge below the shared (already lowered) footer baseline.
+_TRACKED_FOOTER_Y_OFFSET = theme.s(8)
 _TRACKED_FOOTER_BUTTON_SIZE = theme.s(46)
 _TRACKED_FOOTER_BUTTON_GAP = theme.s(25)
 # Visual plane size vs layout row height are separate so the icon can be large

@@ -32,6 +32,11 @@ MANAGED_KEYS = (
     "HOME_LON",
 )
 
+# Non-secret keys from config.h that should become env vars when unset.
+CONFIG_H_SETTINGS = MANAGED_KEYS + (
+    "SHOW_AIRLINE_LOGOS",
+)
+
 TOGGLE_KEYS = (
     "USE_FR24_API",
     "USE_TOMORROW_WEATHER",
@@ -151,7 +156,7 @@ def _merged_secrets() -> dict[str, str]:
 def bootstrap_secrets() -> None:
     """Apply config.h + secrets.json to os.environ when env vars are unset."""
     for key, value in _merged_secrets().items():
-        if key in MANAGED_KEYS and value and not os.environ.get(key, "").strip():
+        if key in CONFIG_H_SETTINGS and value and not os.environ.get(key, "").strip():
             os.environ[key] = value
 
 

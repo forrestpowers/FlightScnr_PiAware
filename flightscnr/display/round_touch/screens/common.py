@@ -42,11 +42,40 @@ def draw_center_row(surface, text: str, y: int, font, color) -> int:
     return h
 
 
-def draw_logo(surface, flight: dict, y: int, *, logo_h: int | None = None) -> int:
-    logo_h = theme.s(36) if logo_h is None else logo_h
+def draw_logo(
+    surface,
+    flight: dict,
+    y: int,
+    *,
+    logo_h: int | None = None,
+    allow_airline_logo: bool = True,
+) -> int:
+    """Aircraft photo when available; optionally fall back to airline logo."""
+    photo_path = (flight.get("photo_path") or "").strip()
+    if photo_path:
+        from display.round_touch import aircraft_photos
+
+        max_h = theme.s(108) if logo_h is None else max(logo_h, theme.s(72))
+        # Leave side margins on the round bezel so the photo isn't clipped.
+        max_w = int(theme.VISIBLE_RADIUS * 1.45)
+        photo = aircraft_photos.load_photo_surface(
+            photo_path,
+            max_h,
+            max_w=max_w,
+            radius=theme.s(8),
+        )
+        if photo is not None:
+            rect = photo.get_rect(midtop=(theme.CENTER_X, y))
+            surface.blit(photo, rect)
+            return y + rect.height + theme.s(3)
+
+    if not allow_airline_logo:
+        return y
+
+    logo_h = theme.s(28) if logo_h is None else logo_h
     logo = logos.load_logo_surface(logos.icao_for_flight(flight), logo_h)
     if logo is None:
         return y
     rect = logo.get_rect(midtop=(theme.CENTER_X, y))
     surface.blit(logo, rect)
-    return y + rect.height + theme.s(4)
+    return y + rect.height + theme.s(3)

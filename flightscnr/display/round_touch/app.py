@@ -121,6 +121,10 @@ class RoundTouchDisplay:
         self._route_enrichment: dict[str, dict] = {}
         self._route_enrich_inflight: set[str] = set()
         self._route_enrich_redraw = False
+        self._aircraft_photos: dict[str, dict] = {}
+        self._aircraft_photo_inflight: set[str] = set()
+        self._aircraft_photo_miss: set[str] = set()
+        self._aircraft_photo_redraw = False
         self._last_settings_reload = 0.0
         self._off_hours_wake_until = 0.0
 
@@ -417,10 +421,29 @@ class RoundTouchDisplay:
     def _flights_for_detail(self):
         self._sync_selected_flight_index()
         ordered = self._ordered_flights()
-        return [merge_route_enrichment(f, self._route_enrichment) for f in ordered]
+        out = []
+        for f in ordered:
+            merged = merge_route_enrichment(f, self._route_enrichment)
+            merged = self._merge_aircraft_photo(merged)
+            out.append(merged)
+        return out
+
+    def _merge_aircraft_photo(self, flight: dict) -> dict:
+        from utilities.aircraft_photo import normalize_icao_hex, photo_credit_line
+
+        hex_id = normalize_icao_hex(flight.get("icao_hex") or flight.get("hex"))
+        if not hex_id:
+            return flight
+        photo = self._aircraft_photos.get(hex_id)
+        if not photo:
+            return flight
+        merged = dict(flight)
+        merged["photo_path"] = photo.get("path") or ""
+        merged["photo_credit"] = photo_credit_line(photo)
+        return merged
 
     def _maybe_enrich_flight_detail(self):
-        """Fetch AirLabs route data for the open flight detail row (background)."""
+        """Fetch AirLabs route + planespotters photo for the open detail row."""
         if self.screen != SCREEN_FLIGHT:
             return
         self._sync_selected_flight_index()
@@ -429,6 +452,7 @@ class RoundTouchDisplay:
             return
         idx = max(0, min(self.flight_index, len(ordered) - 1))
         flight = ordered[idx]
+        self._maybe_fetch_aircraft_photo(flight)
         if not needs_route_enrichment(flight):
             return
         callsign = lookup_callsign(flight)
@@ -446,6 +470,44 @@ class RoundTouchDisplay:
                     self._route_enrich_redraw = True
             finally:
                 self._route_enrich_inflight.discard(callsign)
+
+        Thread(target=_work, daemon=True).start()
+
+    def _maybe_fetch_aircraft_photo(self, flight: dict) -> None:
+        from utilities.aircraft_photo import (
+            fetch_aircraft_photo_for,
+            get_cached_aircraft_photo,
+            normalize_icao_hex,
+        )
+
+        hex_id = normalize_icao_hex(flight.get("icao_hex") or flight.get("hex"))
+        if not hex_id:
+            return
+        if hex_id in self._aircraft_photos or hex_id in self._aircraft_photo_miss:
+            return
+        if hex_id in self._aircraft_photo_inflight:
+            return
+
+        cached = get_cached_aircraft_photo(hex_id)
+        if cached:
+            self._aircraft_photos[hex_id] = cached
+            self._aircraft_photo_redraw = True
+            return
+
+        self._aircraft_photo_inflight.add(hex_id)
+        snapshot = dict(flight)
+
+        def _work():
+            try:
+                photo = fetch_aircraft_photo_for(snapshot)
+                if photo and photo.get("path"):
+                    self._aircraft_photos[hex_id] = photo
+                    self._aircraft_photo_redraw = True
+                    logger.info("[photo] detail ready for %s", hex_id)
+                else:
+                    self._aircraft_photo_miss.add(hex_id)
+            finally:
+                self._aircraft_photo_inflight.discard(hex_id)
 
         Thread(target=_work, daemon=True).start()
 
@@ -916,6 +978,10 @@ class RoundTouchDisplay:
 
                 if self._route_enrich_redraw and self.screen == SCREEN_FLIGHT:
                     self._route_enrich_redraw = False
+                    self._safe_draw()
+
+                if self._aircraft_photo_redraw and self.screen == SCREEN_FLIGHT:
+                    self._aircraft_photo_redraw = False
                     self._safe_draw()
 
                 if self._weather_redraw_pending and self.screen in (

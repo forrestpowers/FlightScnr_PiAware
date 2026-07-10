@@ -43,7 +43,8 @@ def _top_y() -> int:
 
 
 def _footer_top_y() -> int:
-    return theme.CENTER_Y + int(theme.VISIBLE_RADIUS * 0.59)
+    # Keep text hints aligned with the lowered footer button row.
+    return theme.CENTER_Y + int(theme.VISIBLE_RADIUS * 0.68)
 
 
 def _footer_button_height() -> int:
@@ -54,7 +55,8 @@ def _footer_band(y_offset: int = 0, button_height: int | None = None) -> tuple[i
     """Return (top_y, band_height) for the footer button row."""
     btn_h = button_height or _footer_button_height()
     pad = theme.s(6)
-    center_y = theme.CENTER_Y + int(theme.VISIBLE_RADIUS * 0.62) + y_offset
+    # Lower on the round dial so detail content (photos + telemetry) clears HDG.
+    center_y = theme.CENTER_Y + int(theme.VISIBLE_RADIUS * 0.71) + y_offset
     top = center_y - btn_h // 2 - pad // 2
     return top, btn_h + pad
 

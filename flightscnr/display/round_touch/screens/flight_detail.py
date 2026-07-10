@@ -1,10 +1,15 @@
-"""Flight detail screen."""
+"""Flight detail screen — photo header + compact text for the round display."""
 
 from display.round_touch import aircraft, draw, geo, nav, theme
 from display.round_touch.screens import common
 from utilities.airline_branding import display_flight_id_for_flight
 from utilities.icao_types import format_aircraft_type
 from utilities.route_labels import route_display_lines
+
+try:
+    from config import SHOW_AIRLINE_LOGOS
+except ImportError:
+    SHOW_AIRLINE_LOGOS = False
 
 FOOTER_BUTTONS = ("prev", "next", "radar")
 FOOTER_EMPTY = ("radar",)
@@ -26,11 +31,13 @@ def tap_footer_action(x: int, y: int, flights) -> str | None:
 
 def draw_flight_detail(surface, flights, selected_index, scroll_offset: int = 0) -> int:
     draw.fill_background(surface)
-    title_font = draw.load_font(theme.s(22), bold=True)
-    body_font = draw.load_font(theme.s(18))
-    detail_font = draw.load_font(theme.s(16))
+    # Slightly smaller type so photo + details fit the round viewport.
+    title_font = draw.load_font(theme.s(18), bold=True)
+    body_font = draw.load_font(theme.s(14))
+    detail_font = draw.load_font(theme.s(13))
     chrome_top = nav.content_top_y(has_dots=True)
-    line_gap = theme.s(3)
+    line_gap = theme.s(1)
+    bottom = nav.content_bottom_y()
 
     if not flights:
         nav.draw_breadcrumb(surface, ["Radar", "Flight"])
@@ -66,31 +73,50 @@ def draw_flight_detail(surface, flights, selected_index, scroll_offset: int = 0)
     if lat is not None and lon is not None:
         dist_line = common.format_local_distance(geo.local_offset_km(lat, lon)[2])
 
+    has_photo = bool((f.get("photo_path") or "").strip())
+    show_logo = bool(SHOW_AIRLINE_LOGOS) and not has_photo
     rows: list[tuple[str, object, tuple[int, int, int]]] = [
         (callsign, title_font, theme.LABEL),
         (airline, body_font, theme.MUTED),
     ]
-    route_y = chrome_top + theme.s(72)
+    # Estimate route wrap around the photo; body copy starts lower with a photo.
+    if has_photo:
+        route_y = chrome_top + theme.s(118)
+    elif show_logo:
+        route_y = chrome_top + theme.s(48)
+    else:
+        route_y = chrome_top + theme.s(8)
     for route_line in route_display_lines(origin, dest, font=body_font, y=route_y):
         rows.append((route_line, body_font, theme.ROUTE))
-    if plane_type:
-        rows.append((plane_type, detail_font, theme.MUTED))
-    if telemetry:
-        rows.append(("  ·  ".join(telemetry), detail_font, theme.LABEL))
-    if dist_line:
-        rows.append((dist_line, detail_font, theme.MUTED))
 
-    logo_h = theme.s(36) + theme.s(4)
+    # Pack type + live stats onto fewer lines for the narrow circle.
+    meta_bits = [b for b in (plane_type, dist_line) if b]
+    if meta_bits:
+        rows.append((" · ".join(meta_bits), detail_font, theme.MUTED))
+    if telemetry:
+        rows.append((" · ".join(telemetry), detail_font, theme.LABEL))
+    credit = (f.get("photo_credit") or "").strip()
+    if credit:
+        rows.append((credit, detail_font, theme.HINT))
+
+    if has_photo:
+        header_h = theme.s(112)
+    elif show_logo:
+        header_h = theme.s(32)
+    else:
+        header_h = 0
     rows_h = sum(font.get_height() + line_gap for _, font, _ in rows) - line_gap
-    total_h = logo_h + rows_h
-    bottom = nav.content_bottom_y()
+    total_h = header_h + theme.s(4) + rows_h
     max_scroll = max(0, total_h - (bottom - chrome_top))
 
     y = chrome_top - scroll_offset
-    y = common.draw_logo(surface, f, y)
+    y = common.draw_logo(
+        surface, f, y, allow_airline_logo=bool(SHOW_AIRLINE_LOGOS)
+    )
     for text, font, color in rows:
         h = font.get_height()
-        if y + h >= chrome_top and y <= bottom:
+        # Full line must clear the footer so HDG can't sit under the radar button.
+        if y >= chrome_top and y + h <= bottom:
             common.draw_center_row(surface, text, int(y), font, color)
         y += h + line_gap
 

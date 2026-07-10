@@ -249,6 +249,8 @@ DISPLAY_ROTATION = int(os.environ.get("DISPLAY_ROTATION", "90")) % 360
 if DISPLAY_ROTATION not in (0, 90, 180, 270):
     DISPLAY_ROTATION = round(DISPLAY_ROTATION / 90) * 90 % 360
 DISPLAY_FULLSCREEN = _bool(os.environ.get("DISPLAY_FULLSCREEN", "True"))
+# Flight detail: show airline logo when no aircraft photo (False = photo-only / text).
+SHOW_AIRLINE_LOGOS = _bool(os.environ.get("SHOW_AIRLINE_LOGOS", "False"))
 
 
 def square_framebuffer_side() -> int:

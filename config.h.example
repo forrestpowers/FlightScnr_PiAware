@@ -25,3 +25,6 @@ TOMORROW_API_KEY =
 // Radar center (or set location in the web portal)
 HOME_LAT = 37.619664
 HOME_LON = -122.372035
+
+// Flight detail: airline logo when no planespotters photo (True/False)
+SHOW_AIRLINE_LOGOS = False
