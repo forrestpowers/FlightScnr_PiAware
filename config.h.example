@@ -22,9 +22,24 @@ TOMORROW_API_KEY =
 // Optional — schedule lookup when a flight is not airborne yet
 // AIRLABS_API_KEY =
 
+// Optional — aisstream.io AIS vessels (https://aisstream.io — free, non-commercial)
+// AISSTREAM_API_KEY =
+
 // Radar center (or set location in the web portal)
 HOME_LAT = 37.619664
 HOME_LON = -122.372035
 
 // Flight detail: airline logo when no planespotters photo (True/False)
 SHOW_AIRLINE_LOGOS = False
+
+// AIS vessel radar declutter
+// One-line name only (no type/speed); never label with MMSI
+VESSEL_SHORT_TAGS = True
+// Hide anchored/moored / near-zero SOG vessels from the radar
+VESSEL_HIDE_PARKED = True
+// Dim parked icons; brighter moving hulls (when parked are shown)
+VESSEL_HIERARCHY = True
+// Label policy: all_labels | moving_only | icons_only
+VESSEL_DENSITY_MODE = moving_only
+// SOG below this (knots) counts as parked when nav status is unknown
+VESSEL_PARKED_SOG_KT = 0.5

@@ -57,7 +57,11 @@ def _draw_silhouette(surface, cx, cy, heading_deg, color, scale: float):
 
 
 def draw_plane_icon(surface, cx, cy, heading_deg, color, compact=False, flight=None):
-    """Filled top-down aircraft icon — categorized PNG when assets are available."""
+    """Filled top-down aircraft or vessel icon."""
+    if flight and flight.get("kind") == "vessel":
+        draw_ship_icon(surface, cx, cy, heading_deg, color, compact=compact, flight=flight)
+        return
+
     from display.round_touch import aircraft_type_icons
 
     size = theme.s(22) if compact else theme.s(34)
@@ -72,6 +76,39 @@ def draw_plane_icon(surface, cx, cy, heading_deg, color, compact=False, flight=N
         return
     scale = 0.40 if compact else 0.68
     _draw_silhouette(surface, cx, cy, heading_deg, color, scale)
+
+
+# AIS-style chevron / arrowhead (tip toward -Y = heading).
+# Concave stern like a classic nav cursor — matches common marine trackers.
+_SHIP_ARROW = (
+    (0.0, -11.0),   # tip (bow)
+    (7.0, 9.0),     # starboard base
+    (0.0, 4.5),     # concave stern notch
+    (-7.0, 9.0),    # port base
+)
+
+
+def draw_ship_icon(surface, cx, cy, heading_deg, color, compact=False, flight=None):
+    """Vessel glyph: heading chevron when moving; quiet dot when parked/compact."""
+    from display.round_touch import vessel_declutter
+
+    parked = vessel_declutter.is_parked(flight) if flight else bool(flight and flight.get("stationary"))
+    if parked or compact:
+        # Hierarchy: parked dots stay smaller / quieter than moving hulls.
+        if vessel_declutter.hierarchy_enabled() and parked and not compact:
+            r = theme.s(5)
+        else:
+            r = theme.s(4) if compact else theme.s(6)
+        pygame.draw.circle(surface, color, (int(cx), int(cy)), r)
+        pygame.draw.circle(surface, theme.BG, (int(cx), int(cy)), max(1, r - 2), 1)
+        return
+
+    scale = theme.s(10) / 10.0
+    pts = [_map_local(x * scale, y * scale, cx, cy, heading_deg) for x, y in _SHIP_ARROW]
+    if len(pts) >= 3:
+        pygame.draw.polygon(surface, color, pts)
+        outline = (0, 0, 0)
+        pygame.draw.polygon(surface, outline, pts, max(1, theme.s(1)))
 
 
 def draw_progress_plane(surface, cx, cy, color, flight=None, *, size: int | None = None):

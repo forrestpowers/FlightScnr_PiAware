@@ -117,6 +117,12 @@
                 <label for="show_sweep">Show radar sweep line</label>
                 <span class="switch"><input id="show_sweep" type="checkbox"><span class="track"></span></span>
             </div>
+            <label for="ais_enabled">AIS vessel data (aisstream.io)</label>
+            <select id="ais_enabled">
+                <option value="off">Disabled</option>
+                <option value="on">Enabled</option>
+            </select>
+            <p class="hint">Requires an aisstream.io API key below. Free for non-commercial use.</p>
             <button class="btn btn-primary" id="btn-radar" style="margin-top:.7rem" type="button">Save radar settings</button>
             <div id="radar-status" class="status"></div>
         </div>
@@ -242,7 +248,7 @@
     </details>
 
     <details class="card">
-        <summary><span class="ico">&#128273;</span>API Keys<span class="sum">FR24, Tomorrow.io, AirLabs</span><span class="chev">&#9656;</span></summary>
+        <summary><span class="ico">&#128273;</span>API Keys<span class="sum">FR24, Tomorrow.io, AirLabs, AIS</span><span class="chev">&#9656;</span></summary>
         <div class="body">
             <div class="chk">
                 <label for="use-fr24-api">Use FR24 API</label>
@@ -265,6 +271,14 @@
             <label for="airlabs-key">AirLabs key (optional)</label>
             <input type="password" id="airlabs-key" placeholder="API key" autocomplete="off">
             <p class="hint" id="airlabs-hint"></p>
+            <div class="chk">
+                <label for="use-aisstream-api">Use aisstream.io API key</label>
+                <span class="switch"><input id="use-aisstream-api" type="checkbox" checked><span class="track"></span></span>
+            </div>
+            <label for="aisstream-key">aisstream.io key</label>
+            <input type="password" id="aisstream-key" placeholder="API key" autocomplete="off">
+            <p class="hint" id="aisstream-hint"></p>
+            <p class="hint">Get a free key at <a href="https://aisstream.io" target="_blank" rel="noopener">aisstream.io</a> (non-commercial).</p>
             <div class="track-row" style="margin-top:.6rem">
                 <button class="btn btn-primary" id="btn-keys-save" type="button">Save keys</button>
                 <button class="btn" id="btn-keys-restart" type="button">Save &amp; restart</button>
@@ -341,7 +355,12 @@ async function jsonFetch(url, opts = {}) {
 }
 
 function applyKeyHints(keys) {
-    const map = { FR24_API_KEY: "fr24-hint", TOMORROW_API_KEY: "tomorrow-hint", AIRLABS_API_KEY: "airlabs-hint" };
+    const map = {
+        FR24_API_KEY: "fr24-hint",
+        TOMORROW_API_KEY: "tomorrow-hint",
+        AIRLABS_API_KEY: "airlabs-hint",
+        AISSTREAM_API_KEY: "aisstream-hint",
+    };
     Object.entries(map).forEach(([key, id]) => {
         const info = keys[key] || {};
         $(id).textContent = info.configured ? `Current: ${info.masked} (${info.source})` : "Not set";
@@ -524,6 +543,7 @@ async function loadAll() {
         $("radar_theme").value = String(r.theme_index || 0);
         $("show_compass").checked = !!r.show_compass_rose;
         $("show_sweep").checked = !!r.show_sweep_line;
+        $("ais_enabled").value = r.ais_enabled ? "on" : "off";
     } catch (_) {}
 
     try {
@@ -569,6 +589,7 @@ async function loadAll() {
         $("use-fr24-api").checked = toggles.USE_FR24_API !== false;
         $("use-tomorrow-weather").checked = toggles.USE_TOMORROW_WEATHER !== false;
         $("use-airlabs-api").checked = toggles.USE_AIRLABS_API !== false;
+        $("use-aisstream-api").checked = toggles.USE_AISSTREAM_API !== false;
     } catch (_) {}
 }
 
@@ -595,6 +616,7 @@ async function saveRadar() {
                 theme_index: Number($("radar_theme").value),
                 show_compass_rose: $("show_compass").checked,
                 show_sweep_line: $("show_sweep").checked,
+                ais_enabled: $("ais_enabled").value === "on",
             }),
         });
         showStatus("radar-status", "Radar settings saved.");
@@ -686,15 +708,18 @@ async function saveApiKeys(restart) {
                 fr24_api_key: $("fr24-key").value,
                 tomorrow_api_key: $("tomorrow-key").value,
                 airlabs_api_key: $("airlabs-key").value,
+                aisstream_api_key: $("aisstream-key").value,
                 use_fr24_api: $("use-fr24-api").checked,
                 use_tomorrow_weather: $("use-tomorrow-weather").checked,
                 use_airlabs_api: $("use-airlabs-api").checked,
+                use_aisstream_api: $("use-aisstream-api").checked,
                 restart: !!restart,
             }),
         });
         $("fr24-key").value = "";
         $("tomorrow-key").value = "";
         $("airlabs-key").value = "";
+        $("aisstream-key").value = "";
         if (data.keys) applyKeyHints(data.keys);
         showStatus("api-keys-status", data.message || "API keys saved.");
     } catch (e) {

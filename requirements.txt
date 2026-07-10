@@ -20,5 +20,8 @@ grpcio
 Pillow
 requests
 
+# AIS vessel feed (aisstream.io WebSocket)
+websockets>=12.0
+
 # Round touch display (1080×1080 FlightScnr UI)
 pygame>=2.5.0

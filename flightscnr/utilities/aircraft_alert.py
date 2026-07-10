@@ -166,6 +166,8 @@ def on_watchlist(flight: dict) -> bool:
 
 
 def should_alert(flight: dict) -> bool:
+    if flight.get("kind") == "vessel":
+        return False
     if alert_prefs.military_enabled() and is_military(flight):
         return True
     if alert_prefs.emergency_enabled() and is_emergency_squawk(flight):
@@ -181,6 +183,8 @@ def is_highlighted(flight: dict) -> bool:
 
 def is_shown_on_radar(flight: dict) -> bool:
     """True if this aircraft should be drawn when hide-non-alerted is enabled."""
+    if flight.get("kind") == "vessel":
+        return True
     alert_prefs.reload()
     if not alert_prefs.hide_non_alerted():
         return True

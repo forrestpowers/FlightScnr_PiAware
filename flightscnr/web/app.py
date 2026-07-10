@@ -495,6 +495,7 @@ def radar_json():
             "theme_options": list(color_presets.THEME_NAMES),
             "show_compass_rose": settings.show_compass_rose(),
             "show_sweep_line": settings.show_sweep_line(),
+            "ais_enabled": settings.ais_enabled(),
         }
     )
 
@@ -531,6 +532,8 @@ def radar_save():
         settings.set_show_compass_rose(bool(data.get("show_compass_rose")))
     if "show_sweep_line" in data:
         settings.set_show_sweep_line(bool(data.get("show_sweep_line")))
+    if "ais_enabled" in data:
+        settings.set_ais_enabled(bool(data.get("ais_enabled")))
     return jsonify({"ok": True, "message": "Radar settings saved."})
 
 

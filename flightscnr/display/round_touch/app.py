@@ -94,6 +94,12 @@ class RoundTouchDisplay:
 
         self.overhead = Overhead()
         self.overhead.grab_data()
+        try:
+            from utilities.ais_client import sync_ais_client
+
+            sync_ais_client()
+        except Exception:
+            logger.debug("AIS client startup sync skipped", exc_info=True)
 
         self.input = input_handler.TouchInput()
         self.pinch = pinch_handler.PinchZoom()
@@ -102,6 +108,8 @@ class RoundTouchDisplay:
         self.screen = SCREEN_RADAR
         self.settings_page = info.PAGE_MAIN
         self.flights = []
+        self._ais_vessels: list = []
+        self._last_ais_poll = 0.0
         self.flight_index = 0
         # Stable identity for the open detail page (index alone drifts as traffic changes).
         self._selected_flight_id: str | None = None
@@ -125,6 +133,10 @@ class RoundTouchDisplay:
         self._aircraft_photo_inflight: set[str] = set()
         self._aircraft_photo_miss: set[str] = set()
         self._aircraft_photo_redraw = False
+        self._vessel_photos: dict[str, dict] = {}
+        self._vessel_photo_inflight: set[str] = set()
+        self._vessel_photo_miss: set[str] = set()
+        self._vessel_photo_redraw = False
         self._last_settings_reload = 0.0
         self._off_hours_wake_until = 0.0
 
@@ -143,12 +155,27 @@ class RoundTouchDisplay:
                 pass
         self._safe_draw()
 
+    def _refresh_ais_vessels(self) -> None:
+        """Re-read the local AIS vessel table (WebSocket feed is separate)."""
+        if not settings.ais_enabled():
+            self._ais_vessels = []
+            return
+        try:
+            from utilities.ais_client import fetch_ais_radar_entries
+
+            self._ais_vessels = fetch_ais_radar_entries() or []
+        except Exception:
+            logger.exception("[ais] failed to refresh vessel snapshot")
+
     def _refresh_flights(self):
         try:
             scale.select(settings.scale_index())
             if self.overhead.processing:
                 return
-            self.flights = self.overhead.peek_data()
+            flights = list(self.overhead.peek_data() or [])
+            if self._ais_vessels:
+                flights.extend(self._ais_vessels)
+            self.flights = flights
             if self.screen == SCREEN_FLIGHT:
                 self._sync_selected_flight_index()
         except Exception:
@@ -156,13 +183,22 @@ class RoundTouchDisplay:
 
     @staticmethod
     def _flight_identity(flight: dict | None) -> str | None:
-        """Stable key for a flight across radar refresh / distance re-sorts."""
+        """Stable key for a flight/vessel across radar refresh / distance re-sorts."""
         if not flight:
             return None
+        if flight.get("kind") == "vessel":
+            mmsi = str(flight.get("mmsi") or "").strip()
+            if mmsi:
+                return f"mmsi:{mmsi}"
         hex_id = (flight.get("icao_hex") or "").strip().upper()
         if hex_id:
             return f"hex:{hex_id}"
-        callsign = (flight.get("callsign") or flight.get("flight_number") or "").strip().upper()
+        callsign = (
+            flight.get("callsign")
+            or flight.get("flight_number")
+            or flight.get("name")
+            or ""
+        ).strip().upper()
         if callsign:
             return f"cs:{callsign}"
         return None
@@ -374,6 +410,10 @@ class RoundTouchDisplay:
             settings.toggle_sweep_line()
         elif row == 6:
             settings.toggle_auto_idle_clock()
+        elif row == 7:
+            settings.toggle_ais_enabled()
+            self._last_ais_poll = 0.0
+            self._tick_ais()
 
     def _apply_brightness(self):
         from display.round_touch import backlight, off_hours
@@ -424,7 +464,10 @@ class RoundTouchDisplay:
         out = []
         for f in ordered:
             merged = merge_route_enrichment(f, self._route_enrichment)
-            merged = self._merge_aircraft_photo(merged)
+            if merged.get("kind") == "vessel":
+                merged = self._merge_vessel_photo(merged)
+            else:
+                merged = self._merge_aircraft_photo(merged)
             out.append(merged)
         return out
 
@@ -442,8 +485,27 @@ class RoundTouchDisplay:
         merged["photo_credit"] = photo_credit_line(photo)
         return merged
 
+    def _merge_vessel_photo(self, vessel: dict) -> dict:
+        from utilities.vessel_photo import vessel_photo_cache_key
+
+        key = vessel_photo_cache_key(vessel)
+        photo = self._vessel_photos.get(key)
+        if not photo:
+            return vessel
+        merged = dict(vessel)
+        merged["photo_path"] = photo.get("path") or ""
+        artist = (photo.get("artist") or "").strip()
+        license_name = (photo.get("license") or "").strip()
+        bits = [b for b in (artist, license_name, "Wikimedia Commons") if b]
+        # Keep credit short for the round display
+        credit = " · ".join(bits[:2]) if bits else "Wikimedia Commons"
+        if len(credit) > 42:
+            credit = credit[:39] + "…"
+        merged["photo_credit"] = credit
+        return merged
+
     def _maybe_enrich_flight_detail(self):
-        """Fetch AirLabs route + planespotters photo for the open detail row."""
+        """Fetch route / photo enrichment for the open detail row."""
         if self.screen != SCREEN_FLIGHT:
             return
         self._sync_selected_flight_index()
@@ -452,6 +514,9 @@ class RoundTouchDisplay:
             return
         idx = max(0, min(self.flight_index, len(ordered) - 1))
         flight = ordered[idx]
+        if flight.get("kind") == "vessel":
+            self._maybe_fetch_vessel_photo(flight)
+            return
         self._maybe_fetch_aircraft_photo(flight)
         if not needs_route_enrichment(flight):
             return
@@ -511,12 +576,63 @@ class RoundTouchDisplay:
 
         Thread(target=_work, daemon=True).start()
 
+    def _maybe_fetch_vessel_photo(self, vessel: dict) -> None:
+        from utilities.vessel_photo import (
+            fetch_vessel_photo_for,
+            get_cached_vessel_photo,
+            vessel_photo_cache_key,
+        )
+
+        key = vessel_photo_cache_key(vessel)
+        if not key or key in self._vessel_photos or key in self._vessel_photo_miss:
+            return
+        if key in self._vessel_photo_inflight:
+            return
+
+        cached = get_cached_vessel_photo(
+            vessel.get("name") or vessel.get("callsign") or "",
+            vessel.get("imo") or "",
+            vessel.get("mmsi") or "",
+        )
+        if cached:
+            self._vessel_photos[key] = cached
+            self._vessel_photo_redraw = True
+            return
+
+        self._vessel_photo_inflight.add(key)
+        snapshot = dict(vessel)
+
+        def _work():
+            try:
+                photo = fetch_vessel_photo_for(snapshot)
+                if photo and photo.get("path"):
+                    self._vessel_photos[key] = photo
+                    self._vessel_photo_redraw = True
+                    logger.info(
+                        "[commons] detail photo ready for %r",
+                        snapshot.get("name") or snapshot.get("mmsi"),
+                    )
+                else:
+                    self._vessel_photo_miss.add(key)
+            finally:
+                self._vessel_photo_inflight.discard(key)
+
+        Thread(target=_work, daemon=True).start()
+
+        Thread(target=_work, daemon=True).start()
+
     def _open_flight_at(self, x: int, y: int, alt_x: int | None = None, alt_y: int | None = None) -> bool:
         picked = radar.pick_flight_at(self.flights, x, y, alt_x, alt_y)
         ordered = self._ordered_flights()
         if not picked or not ordered:
             return False
         self._select_flight(picked, ordered)
+        if picked.get("kind") == "vessel":
+            logger.info(
+                "[ais] selected vessel MMSI=%s name=%r",
+                picked.get("mmsi"),
+                picked.get("name") or picked.get("callsign"),
+            )
         self._open_screen(SCREEN_FLIGHT)
         self._note_activity()
         self._maybe_enrich_flight_detail()
@@ -830,6 +946,14 @@ class RoundTouchDisplay:
         scale.select(settings.scale_index())
         map_bg.request_background()
         self._apply_brightness()
+        try:
+            from utilities.ais_client import sync_ais_client
+
+            sync_ais_client()
+            # Force an AIS snapshot soon after enable/disable or range changes.
+            self._last_ais_poll = 0.0
+        except Exception:
+            logger.debug("AIS sync after settings reload failed", exc_info=True)
         self._safe_draw()
 
     def _maybe_reload_location(self):
@@ -866,6 +990,13 @@ class RoundTouchDisplay:
         except Exception:
             logger.exception("Flight data poll failed")
 
+    def _tick_ais(self):
+        try:
+            self._refresh_ais_vessels()
+            self._refresh_flights()
+        except Exception:
+            logger.exception("[ais] vessel poll failed")
+
     def run(self):
         logger.info(
             "Round touch display starting (%dx%d framebuffer, rotation=%d°, visible radius=%d)",
@@ -879,9 +1010,10 @@ class RoundTouchDisplay:
         last_data_poll = 0
         last_location_check = 0
         try:
-            from config import DATA_REFRESH_SECONDS
+            from config import AIS_REFRESH_SECONDS, DATA_REFRESH_SECONDS
         except ImportError:
             DATA_REFRESH_SECONDS = 2.0
+            AIS_REFRESH_SECONDS = 5.0
 
         try:
             while running:
@@ -956,6 +1088,10 @@ class RoundTouchDisplay:
                     self._tick_data()
                     last_data_poll = now
 
+                if now - self._last_ais_poll >= AIS_REFRESH_SECONDS:
+                    self._tick_ais()
+                    self._last_ais_poll = now
+
                 grab_seq = self.overhead.grab_seq
                 if grab_seq != self._last_grab_seq:
                     self._last_grab_seq = grab_seq
@@ -982,6 +1118,11 @@ class RoundTouchDisplay:
 
                 if self._aircraft_photo_redraw and self.screen == SCREEN_FLIGHT:
                     self._aircraft_photo_redraw = False
+                    self._safe_draw()
+
+                if self._vessel_photo_redraw and self.screen == SCREEN_FLIGHT:
+                    self._vessel_photo_redraw = False
+                    self._safe_draw()
                     self._safe_draw()
 
                 if self._weather_redraw_pending and self.screen in (

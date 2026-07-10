@@ -1,6 +1,7 @@
-"""Tests for planespotters aircraft photo helpers."""
+"""Tests for planespotters + Commons type-fallback aircraft photo helpers."""
 
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 from unittest import mock
@@ -19,6 +20,17 @@ class TestAircraftPhoto(unittest.TestCase):
         self.assertEqual(aircraft_photo.normalize_icao_hex(""), "")
         self.assertEqual(aircraft_photo.normalize_icao_hex("abc"), "")
 
+    def test_normalize_type_code(self):
+        self.assertEqual(aircraft_photo.normalize_type_code("EC45"), "EC45")
+        self.assertEqual(aircraft_photo.normalize_type_code(" as65 "), "AS65")
+        self.assertEqual(aircraft_photo.normalize_type_code(""), "")
+        self.assertEqual(aircraft_photo.normalize_type_code("TOOLONG"), "")
+
+    def test_normalize_registration(self):
+        self.assertEqual(aircraft_photo.normalize_registration("12-72233"), "12-72233")
+        self.assertEqual(aircraft_photo.normalize_registration(" N12345 "), "N12345")
+        self.assertEqual(aircraft_photo.normalize_registration("ab"), "")
+
     def test_pick_image_url(self):
         photo = {
             "thumbnail_large": {"src": "https://t.plnspttrs.net/x_280.jpg"},
@@ -28,18 +40,100 @@ class TestAircraftPhoto(unittest.TestCase):
 
     def test_lookup_caches_miss(self):
         with mock.patch.object(aircraft_photo, "_load_meta", return_value={
-            "3c66b3": {"miss": True, "ts": 9e12},
+            "3c66b3": {
+                "miss": True,
+                "ts": 9e12,
+                "logic_version": aircraft_photo.PHOTO_LOGIC_VERSION,
+            },
         }):
             with mock.patch("utilities.aircraft_photo.requests.get") as get:
                 result = aircraft_photo.lookup_aircraft_photo("3C66B3")
                 self.assertIsNone(result)
                 get.assert_not_called()
 
-    def test_credit_line(self):
+    def test_stale_miss_retries_after_logic_bump(self):
+        with mock.patch.object(aircraft_photo, "_load_meta", return_value={
+            "3c66b3": {"miss": True, "ts": 9e12, "logic_version": 1},
+        }):
+            with mock.patch.object(
+                aircraft_photo, "_planespotters_lookup", return_value=None
+            ) as ps:
+                with mock.patch.object(
+                    aircraft_photo, "_lookup_type_commons", return_value=None
+                ):
+                    with mock.patch.object(aircraft_photo, "_store_miss"):
+                        result = aircraft_photo.lookup_aircraft_photo(
+                            "3C66B3", aircraft_type="EC45"
+                        )
+                        self.assertIsNone(result)
+                        ps.assert_called()
+
+    def test_type_search_queries_include_aliases(self):
+        queries = aircraft_photo._type_search_queries("EC45")
+        blob = " ".join(queries).lower()
+        self.assertTrue(queries)
+        self.assertIn("ec145", blob)
+
+    def test_fetch_passes_type_and_reg(self):
+        with mock.patch.object(
+            aircraft_photo, "lookup_aircraft_photo", return_value=None
+        ) as lookup:
+            aircraft_photo.fetch_aircraft_photo_for({
+                "icao_hex": "A9ADD7",
+                "plane": "EC45",
+                "registration": "12-72233",
+            })
+            lookup.assert_called_once_with(
+                "a9add7",
+                aircraft_type="EC45",
+                registration="12-72233",
+                force=False,
+            )
+
+    def test_credit_line_planespotters(self):
         self.assertEqual(
             aircraft_photo.photo_credit_line({"photographer": "Jane Doe"}),
             "© Jane Doe",
         )
+
+    def test_credit_line_commons_type(self):
+        line = aircraft_photo.photo_credit_line({
+            "source": "wikimedia_commons",
+            "photographer": "Alice",
+            "match": "type",
+            "type_code": "EC45",
+        })
+        self.assertIn("Alice", line)
+        self.assertIn("EC45", line)
+
+    def test_hex_miss_falls_back_to_commons_type(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            aircraft_photo._CACHE_DIR = tmp
+            aircraft_photo._META_PATH = str(Path(tmp) / "index.json")
+            aircraft_photo._meta = {}
+
+            commons_hit = {
+                "miss": False,
+                "path": str(Path(tmp) / "a9add7_type.jpg"),
+                "source": "wikimedia_commons",
+                "match": "type",
+                "type_code": "EC45",
+                "photographer": "Commons User",
+            }
+            Path(commons_hit["path"]).write_bytes(b"fake-image-bytes-here")
+
+            with mock.patch.object(
+                aircraft_photo, "_planespotters_lookup", return_value=None
+            ):
+                with mock.patch.object(
+                    aircraft_photo, "_lookup_type_commons", return_value=commons_hit
+                ) as commons:
+                    result = aircraft_photo.lookup_aircraft_photo(
+                        "A9ADD7", aircraft_type="EC45"
+                    )
+                    self.assertIsNotNone(result)
+                    self.assertEqual(result["source"], "wikimedia_commons")
+                    commons.assert_called_once()
 
 
 if __name__ == "__main__":

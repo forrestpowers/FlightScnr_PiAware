@@ -50,7 +50,10 @@ def draw_logo(
     logo_h: int | None = None,
     allow_airline_logo: bool = True,
 ) -> int:
-    """Aircraft photo when available; optionally fall back to airline logo."""
+    """Aircraft/vessel photo when available; optional airline logo / vessel flag fallback."""
+    if flight.get("kind") == "vessel":
+        return _draw_vessel_header(surface, flight, y, logo_h=logo_h)
+
     photo_path = (flight.get("photo_path") or "").strip()
     if photo_path:
         from display.round_touch import aircraft_photos
@@ -76,6 +79,35 @@ def draw_logo(
     logo = logos.load_logo_surface(logos.icao_for_flight(flight), logo_h)
     if logo is None:
         return y
+    rect = logo.get_rect(midtop=(theme.CENTER_X, y))
+    surface.blit(logo, rect)
+    return y + rect.height + theme.s(3)
+
+
+def _draw_vessel_header(surface, flight: dict, y: int, *, logo_h: int | None = None) -> int:
+    """Vessel photo (Commons) when available, else flag-of-registry."""
+    from display.round_touch import flags, vessel_photos
+
+    photo_path = (flight.get("photo_path") or "").strip()
+    if photo_path:
+        max_h = theme.s(110) if logo_h is None else max(logo_h, theme.s(72))
+        max_w = int(theme.VISIBLE_RADIUS * 1.35)
+        photo = vessel_photos.load_photo_surface(photo_path, max_h, max_w=max_w)
+        if photo is not None:
+            rect = photo.get_rect(midtop=(theme.CENTER_X, y))
+            surface.blit(photo, rect)
+            return y + rect.height + theme.s(3)
+
+    flag_h = theme.s(36) if logo_h is None else logo_h
+    iso2 = (flight.get("flag_iso2") or "").strip().lower()
+    logo = flags.load_flag_surface(iso2, flag_h) if iso2 else None
+    if logo is None:
+        font = draw.load_font(theme.s(18), bold=True)
+        label = (iso2 or flight.get("flag_country") or "??").upper()
+        rendered = font.render(label, True, theme.LABEL)
+        rect = rendered.get_rect(midtop=(theme.CENTER_X, y))
+        surface.blit(rendered, rect)
+        return y + rect.height + theme.s(3)
     rect = logo.get_rect(midtop=(theme.CENTER_X, y))
     surface.blit(logo, rect)
     return y + rect.height + theme.s(3)

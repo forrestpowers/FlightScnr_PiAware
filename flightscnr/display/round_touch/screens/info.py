@@ -7,6 +7,7 @@ import pygame
 try:
     from config import (
         AIRLABS_API_KEY,
+        AISSTREAM_API_KEY,
         FR24_API_KEY,
         LOCATION_HOME,
         web_portal_url,
@@ -14,6 +15,7 @@ try:
 except ImportError:
     FR24_API_KEY = ""
     AIRLABS_API_KEY = ""
+    AISSTREAM_API_KEY = ""
     LOCATION_HOME = [0.0, 0.0]
 
     def web_portal_url(hostname: str) -> str:
@@ -29,7 +31,7 @@ PAGE_COUNT = 3
 
 FOOTER_BUTTONS = ("prev", "next", "radar")
 
-DISPLAY_ROW_COUNT = 7
+DISPLAY_ROW_COUNT = 8
 
 
 def _hostname():
@@ -154,6 +156,7 @@ def draw_info(surface, page: int, scroll_offset: int = 0, display_focus: int = 0
             f"Web: {web_portal_url(_hostname())}",
             _route_api_line("FR24", FR24_API_KEY),
             _route_api_line("AirLabs", AIRLABS_API_KEY),
+            _route_api_line("AIS", AISSTREAM_API_KEY),
         ]
         detail_font = draw.load_font(theme.FONT_DETAIL)
         gap = theme.s(2)
@@ -175,6 +178,7 @@ def draw_info(surface, page: int, scroll_offset: int = 0, display_focus: int = 0
         rose = "on" if settings.show_compass_rose() else "off"
         sweep = "on" if settings.show_sweep_line() else "off"
         idle = "on" if settings.auto_idle_clock_enabled() else "off"
+        ais = "on" if settings.ais_enabled() else "off"
         rows = [
             f"Brightness: {settings.brightness_percent()}%",
             f"Units: {units}",
@@ -183,6 +187,7 @@ def draw_info(surface, page: int, scroll_offset: int = 0, display_focus: int = 0
             f"Min height: {settings.min_height_ft()} ft",
             f"Sweep line: {sweep}",
             f"Idle clock: {idle}",
+            f"AIS data: {ais}",
         ]
         y = top + theme.s(4)
         row_h = body_font.get_height() + theme.s(8)

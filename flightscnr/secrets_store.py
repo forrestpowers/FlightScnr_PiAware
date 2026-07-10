@@ -28,6 +28,7 @@ MANAGED_KEYS = (
     "FR24_API_KEY",
     "TOMORROW_API_KEY",
     "AIRLABS_API_KEY",
+    "AISSTREAM_API_KEY",
     "HOME_LAT",
     "HOME_LON",
 )
@@ -35,12 +36,18 @@ MANAGED_KEYS = (
 # Non-secret keys from config.h that should become env vars when unset.
 CONFIG_H_SETTINGS = MANAGED_KEYS + (
     "SHOW_AIRLINE_LOGOS",
+    "VESSEL_SHORT_TAGS",
+    "VESSEL_HIDE_PARKED",
+    "VESSEL_HIERARCHY",
+    "VESSEL_DENSITY_MODE",
+    "VESSEL_PARKED_SOG_KT",
 )
 
 TOGGLE_KEYS = (
     "USE_FR24_API",
     "USE_TOMORROW_WEATHER",
     "USE_AIRLABS_API",
+    "USE_AISSTREAM_API",
 )
 
 
@@ -120,6 +127,7 @@ def load_toggles() -> dict[str, bool]:
         "USE_FR24_API": True,
         "USE_TOMORROW_WEATHER": True,
         "USE_AIRLABS_API": True,
+        "USE_AISSTREAM_API": True,
     }
     try:
         with open(SECRETS_JSON_PATH, encoding="utf-8") as fh:
@@ -140,6 +148,7 @@ def api_enabled(key_name: str) -> bool:
         "FR24_API_KEY": "USE_FR24_API",
         "TOMORROW_API_KEY": "USE_TOMORROW_WEATHER",
         "AIRLABS_API_KEY": "USE_AIRLABS_API",
+        "AISSTREAM_API_KEY": "USE_AISSTREAM_API",
     }
     toggle_key = mapping.get(key_name)
     if not toggle_key:
@@ -211,6 +220,7 @@ def save_secrets_from_portal(payload: dict) -> dict[str, str]:
         "fr24_api_key": "FR24_API_KEY",
         "tomorrow_api_key": "TOMORROW_API_KEY",
         "airlabs_api_key": "AIRLABS_API_KEY",
+        "aisstream_api_key": "AISSTREAM_API_KEY",
     }
     for form_key, env_key in field_map.items():
         if form_key not in payload:
@@ -227,6 +237,7 @@ def save_secrets_from_portal(payload: dict) -> dict[str, str]:
         "use_fr24_api": "USE_FR24_API",
         "use_tomorrow_weather": "USE_TOMORROW_WEATHER",
         "use_airlabs_api": "USE_AIRLABS_API",
+        "use_aisstream_api": "USE_AISSTREAM_API",
     }
     for form_key, key in toggle_map.items():
         if form_key in payload:
@@ -247,6 +258,12 @@ def save_secrets_from_portal(payload: dict) -> dict[str, str]:
         from utilities import fr24_client
 
         fr24_client._ensure_env_credentials()
+    except Exception:
+        pass
+    try:
+        from utilities.ais_client import sync_ais_client
+
+        sync_ais_client()
     except Exception:
         pass
     return updated

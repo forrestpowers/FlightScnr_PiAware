@@ -71,13 +71,13 @@ Open from any device on your LAN:
 
 | Section | Purpose |
 |---------|---------|
-| **Radar** | Set radar center (lat/lon), range, distance units, min altitude, color theme, compass, sweep |
+| **Radar** | Set radar center (lat/lon), range, distance units, min altitude, color theme, compass, sweep, AIS enable |
 | **Display & screens** | Brightness, flight-detail and clock timeouts, auto-return to clock when empty |
 | **Off-hours** | Night schedule - dim, turn off display, or show clock |
 | **Weather** | °C / °F for clock and forecast |
 | **Alerts** | Military, emergency squawk, watch list, hide non-alerted aircraft |
 | **Tracking** | Track a callsign; **route search** (origin + destination) for live flights |
-| **API keys** | FR24, Tomorrow.io, AirLabs - save or save & restart |
+| **API keys** | FR24, Tomorrow.io, AirLabs, aisstream.io - save or save & restart |
 | **Updates** | Check GitHub for new releases; **Update Now** runs `git pull` and re-syncs (git checkout required) |
 | **System** | **Reboot** or **Shutdown** the Pi remotely |
 
@@ -213,6 +213,7 @@ If the Pi was installed from a **git clone**, open **Updates** in the portal →
 ## Credits
 
 - Parts of this repo are based on code by [c0wsaysmoo](https://github.com/c0wsaysmoo), used with their prior written permission. Thank you!
+- AIS WebSocket client design adapted from [capsule-radar-ais](https://github.com/socquique/capsule-radar-ais) (MIT).
 
 ## License
 

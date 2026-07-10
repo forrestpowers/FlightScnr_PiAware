@@ -94,12 +94,15 @@ def _resolve_location():
 FR24_API_KEY = _require("FR24_API_KEY")
 TOMORROW_API_KEY = _require("TOMORROW_API_KEY")
 AIRLABS_API_KEY = os.environ.get("AIRLABS_API_KEY", "")
+AISSTREAM_API_KEY = os.environ.get("AISSTREAM_API_KEY", "")
 
 # --- Location (zone + home) ---
 LOCATION_HOME, ZONE_HOME, LOCATION_SOURCE = _resolve_location()
 SEARCH_RADIUS_NM = float(os.environ.get("SEARCH_RADIUS_NM", "15"))
 ADSB_ENABLED = _bool(os.environ.get("ADSB_ENABLED", "True"))
 DATA_REFRESH_SECONDS = float(os.environ.get("DATA_REFRESH_SECONDS", "2"))
+# How often to merge AIS vessels into the radar (WebSocket still pushes continuously)
+AIS_REFRESH_SECONDS = float(os.environ.get("AIS_REFRESH_SECONDS", "5"))
 LOCATION_FILE = os.path.join(
     os.environ.get("FLIGHTSCNR_DATA_DIR", "/var/lib/flightscnr"),
     "location.json",
@@ -251,6 +254,24 @@ if DISPLAY_ROTATION not in (0, 90, 180, 270):
 DISPLAY_FULLSCREEN = _bool(os.environ.get("DISPLAY_FULLSCREEN", "True"))
 # Flight detail: show airline logo when no aircraft photo (False = photo-only / text).
 SHOW_AIRLINE_LOGOS = _bool(os.environ.get("SHOW_AIRLINE_LOGOS", "False"))
+
+# --- AIS vessel radar declutter (config.h) ---
+# One-line vessel name only (no type/speed); never show MMSI as a label.
+VESSEL_SHORT_TAGS = _bool(os.environ.get("VESSEL_SHORT_TAGS", "True"))
+# Hide anchored/moored / near-zero SOG vessels from the radar entirely.
+VESSEL_HIDE_PARKED = _bool(os.environ.get("VESSEL_HIDE_PARKED", "True"))
+# Dim parked icons; keep moving ships brighter (when parked are still shown).
+VESSEL_HIERARCHY = _bool(os.environ.get("VESSEL_HIERARCHY", "True"))
+# Label policy: all_labels | moving_only | icons_only
+_raw_density = (os.environ.get("VESSEL_DENSITY_MODE", "moving_only") or "moving_only").strip().lower()
+if _raw_density in ("all", "all_labels", "labels"):
+    VESSEL_DENSITY_MODE = "all_labels"
+elif _raw_density in ("icons", "icons_only", "icon"):
+    VESSEL_DENSITY_MODE = "icons_only"
+else:
+    VESSEL_DENSITY_MODE = "moving_only"
+# SOG below this (knots) counts as parked when nav status is unknown.
+VESSEL_PARKED_SOG_KT = float(os.environ.get("VESSEL_PARKED_SOG_KT", "0.5"))
 
 
 def square_framebuffer_side() -> int:

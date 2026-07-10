@@ -51,8 +51,9 @@ def _apply_framebuffer_side(side: int) -> None:
     FONT_CLOCK_AMPM = s(36)
     FONT_CARDINAL = s(15)
     FONT_CARDINAL_DIAG = s(15)
-    FONT_TAG = s(15)
-    FONT_TAG_SUB = s(15)
+    # Radar callsign / type / alt tags (aircraft + vessels) — keep compact.
+    FONT_TAG = s(12)
+    FONT_TAG_SUB = s(11)
 
 
 def set_framebuffer_side(side: int) -> None:
@@ -90,6 +91,9 @@ MUTED = (180, 200, 220)
 ROUTE = (100, 220, 255)
 LIVE = (56, 168, 255)
 LIVE_DIM = (28, 84, 128)
+# Parked / slow AIS vessels (dimmer than AIRCRAFT when hierarchy is on).
+VESSEL_PARKED = (120, 90, 40)
+VESSEL_MOVING = AIRCRAFT
 ALERT_MILITARY = (255, 165, 0)
 ALERT_EMERGENCY = (255, 0, 0)
 ALERT_FLASH = (255, 0, 0)

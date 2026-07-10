@@ -26,6 +26,7 @@ _defaults = {
     "auto_idle_clock": True,
     "flight_detail_timeout_s": 20,
     "clock_timeout_s": 10,
+    "ais_enabled": False,
 }
 
 
@@ -144,6 +145,7 @@ def _settings_snapshot(state: dict) -> tuple:
         state.get("clock_timeout_s"),
         state.get("clock_12hr"),
         state.get("auto_timezone"),
+        state.get("ais_enabled"),
     )
 
 
@@ -255,6 +257,31 @@ def toggle_sweep_line():
 def set_show_sweep_line(enabled: bool):
     _state["show_sweep"] = bool(enabled)
     _save(_state)
+
+
+def ais_enabled() -> bool:
+    return bool(_state.get("ais_enabled", False))
+
+
+def toggle_ais_enabled():
+    _state["ais_enabled"] = not ais_enabled()
+    _save(_state)
+    _sync_ais_client()
+
+
+def set_ais_enabled(enabled: bool):
+    _state["ais_enabled"] = bool(enabled)
+    _save(_state)
+    _sync_ais_client()
+
+
+def _sync_ais_client():
+    try:
+        from utilities.ais_client import sync_ais_client
+
+        sync_ais_client()
+    except Exception:
+        logger.debug("AIS client sync skipped", exc_info=True)
 
 
 def auto_timezone_enabled() -> bool:

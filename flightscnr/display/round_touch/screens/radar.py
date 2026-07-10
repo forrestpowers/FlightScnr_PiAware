@@ -7,6 +7,7 @@ import pygame
 
 from display.round_touch import aircraft, draw, geo, map_bg, scale, settings, theme
 from display.round_touch import alert_prefs
+from display.round_touch import vessel_declutter
 from utilities import aircraft_alert
 from utilities.overhead import load_tracked_callsign
 
@@ -106,7 +107,89 @@ def _tag_block_metrics():
     return block_h, offsets, main_font, sub_font
 
 
+def _above_min_height(flight) -> bool:
+    if flight.get("kind") == "vessel":
+        return vessel_declutter.should_show_on_radar(flight)
+    try:
+        from config import passes_altitude_filter
+        return passes_altitude_filter(flight.get("altitude"))
+    except ImportError:
+        return True
+
+
+def _draw_vessel_tag(surface, x, y, flight):
+    """One-line vessel name (no MMSI, no type/speed when short tags are on)."""
+    name = vessel_declutter.display_name(flight)
+    if not name:
+        return
+    if vessel_declutter.short_tags_enabled():
+        name = vessel_declutter.truncate_name(name, 14)
+        font = draw.load_font(theme.FONT_TAG, bold=True)
+        color = theme.GRID
+        if vessel_declutter.hierarchy_enabled() and vessel_declutter.is_parked(flight):
+            color = theme.HINT
+        rendered = font.render(name, True, color)
+        tag_on_right = x < theme.CENTER_X
+        symbol_half = theme.AIRCRAFT_ICON_RADIUS
+        if tag_on_right:
+            anchor_x = min(
+                x + symbol_half + theme.AIRCRAFT_LABEL_GAP,
+                theme.CENTER_X + theme.VISIBLE_RADIUS - theme.s(20),
+            )
+            surface.blit(rendered, (anchor_x, y - rendered.get_height() // 2))
+        else:
+            anchor_x = max(
+                x - symbol_half - theme.AIRCRAFT_LABEL_GAP,
+                theme.CENTER_X - theme.VISIBLE_RADIUS + theme.s(20),
+            )
+            surface.blit(rendered, rendered.get_rect(midright=(anchor_x, y)))
+        return
+
+    # Legacy multi-line vessel tag (still never uses MMSI).
+    block_h, offsets, main_font, sub_font = _tag_block_metrics()
+    plane_type = flight.get("plane") or "Vessel"
+    sog = flight.get("sog_kt")
+    try:
+        alt = f"{float(sog):.0f} kt" if sog is not None else (flight.get("nav_status_name") or "")
+    except (TypeError, ValueError):
+        alt = flight.get("nav_status_name") or ""
+    ly = y - block_h // 2
+    tag_on_right = x < theme.CENTER_X
+    symbol_half = theme.AIRCRAFT_ICON_RADIUS
+    if tag_on_right:
+        anchor_x = min(
+            x + symbol_half + theme.AIRCRAFT_LABEL_GAP,
+            theme.CENTER_X + theme.VISIBLE_RADIUS - theme.s(20),
+        )
+        align = "left"
+    else:
+        anchor_x = max(
+            x - symbol_half - theme.AIRCRAFT_LABEL_GAP,
+            theme.CENTER_X - theme.VISIBLE_RADIUS + theme.s(20),
+        )
+        align = "right"
+    lines = [
+        (name, theme.GRID, main_font, offsets[0]),
+        (plane_type, theme.TAG_TYPE, sub_font, offsets[1]),
+        (alt, theme.TAG_ALT_ASCEND, sub_font, offsets[2]),
+    ]
+    for text, color, font, row_y in lines:
+        if not text:
+            continue
+        rendered = font.render(text, True, color)
+        if align == "left":
+            surface.blit(rendered, (anchor_x, ly + row_y))
+        else:
+            surface.blit(rendered, rendered.get_rect(topright=(anchor_x, ly + row_y)))
+
+
 def _draw_aircraft_tag(surface, x, y, flight):
+    if flight.get("kind") == "vessel":
+        if not vessel_declutter.should_label(flight):
+            return
+        _draw_vessel_tag(surface, x, y, flight)
+        return
+
     block_h, offsets, main_font, sub_font = _tag_block_metrics()
     try:
         from utilities.airline_branding import display_flight_id_for_flight
@@ -143,14 +226,6 @@ def _draw_aircraft_tag(surface, x, y, flight):
             surface.blit(rendered, rendered.get_rect(topright=(anchor_x, ly + row_y)))
 
 
-def _above_min_height(flight) -> bool:
-    try:
-        from config import passes_altitude_filter
-        return passes_altitude_filter(flight.get("altitude"))
-    except ImportError:
-        return True
-
-
 def _visible_flights(flights):
     visible = []
     max_km = geo.fetch_max_km()
@@ -182,6 +257,10 @@ def _flight_icon_color(flight, *, compact: bool):
         if aircraft_alert.pulse_phase():
             return theme.ALERT_FLASH
         return theme.GRID
+    if vessel_declutter.is_vessel(flight) and vessel_declutter.hierarchy_enabled():
+        if vessel_declutter.is_parked(flight):
+            return theme.VESSEL_PARKED
+        return theme.VESSEL_MOVING
     return theme.AIRCRAFT
 
 
@@ -206,8 +285,14 @@ def _draw_flights(surface, flights):
             if pos:
                 rim_items.append((dist_km, flight, pos))
 
-    rim_items.sort(key=lambda item: item[0], reverse=True)
-    inner_items.sort(key=lambda item: item[0], reverse=True)
+    # Draw parked vessels under moving ones when hierarchy is on.
+    def _draw_order(item):
+        dist_km, flight, _ = item
+        parked = 1 if vessel_declutter.is_parked(flight) else 0
+        return (parked, -dist_km)
+
+    rim_items.sort(key=_draw_order)
+    inner_items.sort(key=_draw_order)
 
     for _, flight, (x, y) in rim_items:
         aircraft.draw_plane_icon(
@@ -267,9 +352,15 @@ def _draw_status(surface, flights):
             min_line = f"Min height: {settings.min_height_ft()} ft"
         except ImportError:
             min_line = ""
-        lines = [location_status(), "Waiting for adsb.fi / FR24…"]
+        lines = [location_status(), "Waiting for traffic…"]
         if min_line:
             lines.insert(1, min_line)
+        try:
+            from display.round_touch import settings as _settings
+            if _settings.ais_enabled():
+                lines[-1] = "Waiting for aircraft / AIS…"
+        except Exception:
+            pass
         color = theme.HINT
 
     for line in lines:
