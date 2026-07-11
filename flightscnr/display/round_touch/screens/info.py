@@ -31,7 +31,7 @@ PAGE_COUNT = 3
 
 FOOTER_BUTTONS = ("prev", "next", "radar")
 
-DISPLAY_ROW_COUNT = 8
+DISPLAY_ROW_COUNT = 9
 
 
 def _hostname():
@@ -188,6 +188,7 @@ def draw_info(surface, page: int, scroll_offset: int = 0, display_focus: int = 0
         sweep = "on" if settings.show_sweep_line() else "off"
         idle = "on" if settings.auto_idle_clock_enabled() else "off"
         traffic = settings.traffic_mode_label()
+        facing = settings.facing_label()
         # Traffic first — otherwise it clips off the round viewport.
         rows = [
             f"Traffic: {traffic}",
@@ -195,6 +196,7 @@ def draw_info(surface, page: int, scroll_offset: int = 0, display_focus: int = 0
             f"Units: {units}",
             f"Range: {settings.scale_label()}",
             f"Compass Rose: {rose}",
+            f"Facing: {facing}",
             f"Min height: {settings.min_height_ft()} ft",
             f"Sweep line: {sweep}",
             f"Idle clock: {idle}",

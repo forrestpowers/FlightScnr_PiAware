@@ -131,6 +131,14 @@ class TouchInput:
             return False
         return self._max_dist >= _gesture_threshold_px() * 0.3
 
+    def drag_pos(self) -> tuple[int, int] | None:
+        """Current pointer position while a drag is in progress, else None."""
+        if self._start is None:
+            return None
+        if self._drag_end is not None:
+            return (int(self._drag_end[0]), int(self._drag_end[1]))
+        return (int(self._start[0]), int(self._start[1]))
+
     def cancel_gesture(self):
         """Drop in-progress single-touch tracking (e.g. when a pinch starts)."""
         self._start = None

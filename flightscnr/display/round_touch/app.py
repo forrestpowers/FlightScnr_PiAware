@@ -139,6 +139,9 @@ class RoundTouchDisplay:
         self._vessel_photo_redraw = False
         self._last_settings_reload = 0.0
         self._off_hours_wake_until = 0.0
+        self._calibrating_facing = False
+        self._facing_before_calibrate = 0.0
+        self._facing_drag_angle = None
 
         radar._init_sweep()
         map_bg.request_background()
@@ -276,7 +279,11 @@ class RoundTouchDisplay:
             return
 
         if self.screen == SCREEN_RADAR:
-            radar.draw_radar(self.surface, self.flights)
+            radar.draw_radar(
+                self.surface,
+                self.flights,
+                calibrate=self._calibrating_facing,
+            )
         elif self.screen == SCREEN_FLIGHT:
             self._scroll.max_offset = flight_detail.draw_flight_detail(
                 self.surface,
@@ -356,6 +363,8 @@ class RoundTouchDisplay:
 
     def _return_to_radar(self):
         self._fatal_error = None
+        if self._calibrating_facing:
+            self._cancel_facing_calibrate()
         if self.screen == SCREEN_TRACKED:
             tracked.reset_marquee()
         self._radar_visible_since = time.time()
@@ -413,11 +422,85 @@ class RoundTouchDisplay:
         elif row == 4:
             settings.toggle_compass_rose()
         elif row == 5:
-            settings.cycle_min_height()
+            self._begin_facing_calibrate()
         elif row == 6:
-            settings.toggle_sweep_line()
+            settings.cycle_min_height()
         elif row == 7:
+            settings.toggle_sweep_line()
+        elif row == 8:
             settings.toggle_auto_idle_clock()
+
+    def _begin_facing_calibrate(self):
+        """Enter radar facing-calibrate mode (circular drag = dial analogue)."""
+        self._facing_before_calibrate = settings.facing_deg()
+        settings.set_facing_preview(self._facing_before_calibrate)
+        self._calibrating_facing = True
+        self._facing_drag_angle = None
+        self.flights = []
+        self._open_screen(SCREEN_RADAR)
+
+    def _cancel_facing_calibrate(self):
+        if not self._calibrating_facing:
+            return
+        settings.set_facing_preview(None)
+        self._calibrating_facing = False
+        self._facing_drag_angle = None
+        self._refresh_flights()
+
+    def _save_facing_calibrate(self):
+        if not self._calibrating_facing:
+            return
+        preview = settings.effective_facing_deg()
+        settings.set_facing_deg(preview)
+        settings.set_facing_preview(None)
+        self._calibrating_facing = False
+        self._facing_drag_angle = None
+        self._refresh_flights()
+
+    @staticmethod
+    def _angle_about_center(x: float, y: float) -> float:
+        """Screen angle in degrees: 0 = up, clockwise positive."""
+        return math.degrees(math.atan2(x - theme.CENTER_X, theme.CENTER_Y - y))
+
+    def _update_facing_drag(self):
+        """Apply circular-drag delta to the live facing preview."""
+        if not self._calibrating_facing or self.screen != SCREEN_RADAR:
+            self._facing_drag_angle = None
+            return False
+        if not self.input.is_dragging():
+            self._facing_drag_angle = None
+            return False
+        pos = self.input.drag_pos()
+        if pos is None:
+            return False
+        x, y = pos
+        # Ignore near-center jitter — angle is unstable there.
+        if math.hypot(x - theme.CENTER_X, y - theme.CENTER_Y) < theme.s(40):
+            return False
+        angle = self._angle_about_center(x, y)
+        if self._facing_drag_angle is None:
+            self._facing_drag_angle = angle
+            return False
+        delta = angle - self._facing_drag_angle
+        # Unwrap across ±180 so continuous circles work.
+        if delta > 180:
+            delta -= 360
+        elif delta < -180:
+            delta += 360
+        self._facing_drag_angle = angle
+        # Clockwise finger motion decreases facing (rose turns with the finger).
+        preview = (settings.effective_facing_deg() - delta) % 360.0
+        settings.set_facing_preview(preview)
+        return True
+
+    def _facing_tap_action(self, x: int, y: int) -> str | None:
+        """Return 'save' (center), 'cancel' (outer rim), or None."""
+        dist = math.hypot(x - theme.CENTER_X, y - theme.CENTER_Y)
+        if dist <= theme.s(70):
+            return "save"
+        if dist >= theme.VISIBLE_RADIUS - theme.s(48):
+            return "cancel"
+        return None
 
     def _apply_brightness(self):
         from display.round_touch import backlight, off_hours
@@ -701,6 +784,23 @@ class RoundTouchDisplay:
         ):
             self._note_activity()
 
+        # Facing calibrate: circular drag rotates; center tap saves; rim tap cancels.
+        # Swipes from rotate-drags are discarded so they don't navigate or abort.
+        if self._calibrating_facing and self.screen == SCREEN_RADAR:
+            if swipe != input_handler.SWIPE_NONE:
+                return
+            if tap:
+                action = self._facing_tap_action(tap[0], tap[1])
+                if action == "save":
+                    self._save_facing_calibrate()
+                    self._note_activity()
+                    self._safe_draw()
+                elif action == "cancel":
+                    self._cancel_facing_calibrate()
+                    self._note_activity()
+                    self._safe_draw()
+                return
+
         # Tracked sits left of radar: swipe right on radar opens it; swipe left returns.
         if swipe == input_handler.SWIPE_RIGHT and self.screen == SCREEN_RADAR:
             travel = 0.0
@@ -796,7 +896,7 @@ class RoundTouchDisplay:
         elif tap and self.screen == SCREEN_RADAR:
             if self.pinch.should_suppress_tap():
                 tap = None
-            if tap and self._open_flight_at(tap[0], tap[1]):
+            if tap and not self._calibrating_facing and self._open_flight_at(tap[0], tap[1]):
                 self._safe_draw()
         elif tap and self.screen == SCREEN_FLIGHT:
             self._sync_selected_flight_index()
@@ -920,6 +1020,8 @@ class RoundTouchDisplay:
             self._safe_draw()
 
     def _tick_auto_idle_clock(self):
+        if self._calibrating_facing:
+            return
         if not settings.auto_idle_clock_enabled():
             return
         if time.time() < self._boot_until:
@@ -991,6 +1093,8 @@ class RoundTouchDisplay:
             pass
 
     def _tick_data(self):
+        if self._calibrating_facing:
+            return
         try:
             scale.select(settings.scale_index())
             self._refresh_flights()
@@ -1001,6 +1105,8 @@ class RoundTouchDisplay:
             logger.exception("Flight data poll failed")
 
     def _tick_ais(self):
+        if self._calibrating_facing:
+            return
         try:
             self._refresh_ais_vessels()
             self._refresh_flights()
@@ -1086,6 +1192,7 @@ class RoundTouchDisplay:
                         self.gestures.handle_input_event(event)
                         if (
                             self.screen == SCREEN_RADAR
+                            and not self._calibrating_facing
                             and gesture_handler.RadarGestureHandler.is_finger_event(event)
                         ):
                             scale_delta = self.gestures.handle_finger_event(event)
@@ -1093,25 +1200,30 @@ class RoundTouchDisplay:
                                 self._apply_scale_step(scale_delta)
                         self._handle_navigation()
 
+                if self._update_facing_drag():
+                    self._safe_draw()
+                    self._last_radar_draw = time.time()
+
                 now = time.time()
-                if now - last_data_poll >= DATA_REFRESH_SECONDS:
+                if not self._calibrating_facing and now - last_data_poll >= DATA_REFRESH_SECONDS:
                     self._tick_data()
                     last_data_poll = now
 
-                if now - self._last_ais_poll >= AIS_REFRESH_SECONDS:
+                if not self._calibrating_facing and now - self._last_ais_poll >= AIS_REFRESH_SECONDS:
                     self._tick_ais()
                     self._last_ais_poll = now
 
                 grab_seq = self.overhead.grab_seq
                 if grab_seq != self._last_grab_seq:
                     self._last_grab_seq = grab_seq
-                    self._refresh_flights()
-                    if self.screen == SCREEN_TRACKED:
-                        self._safe_draw()
-                        self._last_static_draw = now
-                    elif self.screen == SCREEN_RADAR:
-                        self._safe_draw()
-                        self._last_radar_draw = now
+                    if not self._calibrating_facing:
+                        self._refresh_flights()
+                        if self.screen == SCREEN_TRACKED:
+                            self._safe_draw()
+                            self._last_static_draw = now
+                        elif self.screen == SCREEN_RADAR:
+                            self._safe_draw()
+                            self._last_radar_draw = now
 
                 if now - last_location_check >= 2.0:
                     self._maybe_reload_location()

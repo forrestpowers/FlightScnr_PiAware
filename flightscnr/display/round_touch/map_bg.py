@@ -547,8 +547,22 @@ def draw_background(surface: pygame.Surface):
     bg = get_background()
     if bg is None:
         return
-    rect = bg.get_rect(center=(theme.CENTER_X, theme.CENTER_Y))
-    surface.blit(bg, rect)
+    facing = 0.0
+    try:
+        from display.round_touch import settings
+
+        facing = float(settings.effective_facing_deg() or 0.0)
+    except Exception:
+        facing = 0.0
+    if abs(facing) < 0.05:
+        rect = bg.get_rect(center=(theme.CENTER_X, theme.CENTER_Y))
+        surface.blit(bg, rect)
+        return
+    # pygame rotates CCW; facing east-up needs the north-up map rotated CCW
+    # so east moves to the top (same sense as geo.rotate_offset / the rose).
+    rotated = pygame.transform.rotate(bg, facing)
+    rect = rotated.get_rect(center=(theme.CENTER_X, theme.CENTER_Y))
+    surface.blit(rotated, rect)
 
 
 def attribution_text() -> str | None:

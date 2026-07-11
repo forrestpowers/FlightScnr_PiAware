@@ -18,6 +18,8 @@ _defaults = {
     "brightness_percent": 100,
     "distance_units": "km",
     "show_compass_rose": True,
+    # Real-world direction at the top of the screen (0=north-up).
+    "facing_deg": 0.0,
     "show_sweep": True,
     "scale_index": 1,
     "theme_index": color_presets.DEFAULT_THEME_INDEX,
@@ -32,6 +34,19 @@ _defaults = {
     # Kept in sync with traffic_mode for older readers / portal payloads
     "ais_enabled": False,
 }
+
+# Live preview while calibrating facing (not persisted until save).
+_facing_preview: float | None = None
+
+
+def _normalize_facing(deg) -> float:
+    try:
+        value = float(deg)
+    except (TypeError, ValueError):
+        return 0.0
+    if not (value == value):  # NaN
+        return 0.0
+    return value % 360.0
 
 
 def _snap_min_height(value) -> int:
@@ -131,6 +146,7 @@ def _load():
             state["traffic_mode"] = mode if mode in TRAFFIC_MODES else "aircraft"
         migrated = True
     state["ais_enabled"] = state["traffic_mode"] in ("marine", "both")
+    state["facing_deg"] = _normalize_facing(state.get("facing_deg", 0))
     if migrated:
         _save(state)
     return state
@@ -150,6 +166,7 @@ def _settings_snapshot(state: dict) -> tuple:
         state.get("distance_units"),
         state.get("theme_index"),
         state.get("show_compass_rose"),
+        _normalize_facing(state.get("facing_deg", 0)),
         state.get("show_sweep"),
         state.get("min_height_ft"),
         state.get("brightness_percent"),
@@ -351,6 +368,46 @@ def toggle_compass_rose():
 def set_show_compass_rose(enabled: bool):
     _state["show_compass_rose"] = bool(enabled)
     _save(_state)
+
+
+def facing_deg() -> float:
+    return _normalize_facing(_state.get("facing_deg", 0))
+
+
+def set_facing_deg(deg) -> float:
+    value = _normalize_facing(deg)
+    _state["facing_deg"] = value
+    _save(_state)
+    return value
+
+
+def set_facing_preview(deg: float | None) -> None:
+    """Set/clear live facing preview used while calibrating (not persisted)."""
+    global _facing_preview
+    _facing_preview = None if deg is None else _normalize_facing(deg)
+
+
+def facing_preview() -> float | None:
+    return _facing_preview
+
+
+def effective_facing_deg() -> float:
+    if _facing_preview is not None:
+        return _facing_preview
+    return facing_deg()
+
+
+def facing_label(deg=None) -> str:
+    """Short label for settings: N/E/S/W or integer degrees."""
+    value = facing_deg() if deg is None else _normalize_facing(deg)
+    names = {0.0: "N", 90.0: "E", 180.0: "S", 270.0: "W"}
+    rounded = round(value) % 360
+    if float(rounded) in names and abs(value - float(rounded)) < 0.5:
+        return names[float(rounded)]
+    # Handle 359.7 → 0 for label purposes
+    if abs(value) < 0.5 or abs(value - 360.0) < 0.5:
+        return "N"
+    return f"{int(round(value)) % 360}°"
 
 
 def scale_index():

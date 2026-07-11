@@ -7,7 +7,7 @@ try:
 except ImportError:
     LOCATION_HOME = [0.0, 0.0]
 
-from display.round_touch import scale, theme
+from display.round_touch import scale, settings, theme
 
 
 def local_offset_km(lat: float, lon: float, center_lat=None, center_lon=None):
@@ -29,6 +29,39 @@ def distance_km(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
     dx = (lon2 - lon1) * 111.320 * math.cos(lat_rad)
     dy = (lat2 - lat1) * 110.574
     return math.hypot(dx, dy)
+
+
+def rotate_offset(dx_km: float, dy_km: float, facing_deg: float = 0.0):
+    """Rotate ENU offset so ``facing_deg`` (real-world) points screen-up.
+
+    ``facing_deg`` is the geographic direction at the top of the display
+    (0 = north-up, 90 = east-up, …).
+    """
+    if not facing_deg:
+        return dx_km, dy_km
+    rad = math.radians(facing_deg)
+    cos_a = math.cos(rad)
+    sin_a = math.sin(rad)
+    return dx_km * cos_a - dy_km * sin_a, dx_km * sin_a + dy_km * cos_a
+
+
+def screen_heading(heading_deg: float, facing_deg: float | None = None) -> float:
+    """Map geographic heading to screen heading (nose angle for icons)."""
+    if facing_deg is None:
+        facing_deg = settings.effective_facing_deg()
+    return float(heading_deg or 0) - float(facing_deg or 0)
+
+
+def enu_to_screen(dx_km: float, dy_km: float, facing_deg: float | None = None):
+    """Map east/north km offsets to pixel coordinates (with facing)."""
+    if facing_deg is None:
+        facing_deg = settings.effective_facing_deg()
+    rdx, rdy = rotate_offset(dx_km, dy_km, facing_deg)
+    outer_km = scale.active_band()["label_km"]
+    px_per_km = theme.GRID_OUTER_RADIUS / outer_km
+    x = theme.CENTER_X + int(round(rdx * px_per_km))
+    y = theme.CENTER_Y - int(round(rdy * px_per_km))
+    return x, y
 
 
 def fetch_max_km():
@@ -53,12 +86,8 @@ def inner_ring_max_km():
 
 
 def lat_lon_to_screen(lat: float, lon: float):
-    outer_km = scale.active_band()["label_km"]
-    px_per_km = theme.GRID_OUTER_RADIUS / outer_km
     dx_km, dy_km, _ = local_offset_km(lat, lon)
-    x = theme.CENTER_X + int(round(dx_km * px_per_km))
-    y = theme.CENTER_Y - int(round(dy_km * px_per_km))
-    return x, y
+    return enu_to_screen(dx_km, dy_km)
 
 
 def beyond_ring_position(lat: float, lon: float):
@@ -66,7 +95,9 @@ def beyond_ring_position(lat: float, lon: float):
     if dist_km < 0.01 or dist_km <= inner_ring_max_km():
         return None
     rim_r = theme.VISIBLE_RADIUS - theme.BEYOND_RING_MARGIN
-    angle = math.atan2(dx_km, dy_km)
+    facing = settings.effective_facing_deg()
+    rdx, rdy = rotate_offset(dx_km, dy_km, facing)
+    angle = math.atan2(rdx, rdy)
     x = theme.CENTER_X + int(round(math.sin(angle) * rim_r))
     y = theme.CENTER_Y - int(round(math.cos(angle) * rim_r))
     return x, y

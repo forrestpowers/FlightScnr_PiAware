@@ -494,6 +494,7 @@ def radar_json():
             "theme_index": settings.theme_index(),
             "theme_options": list(color_presets.THEME_NAMES),
             "show_compass_rose": settings.show_compass_rose(),
+            "facing_deg": settings.facing_deg(),
             "show_sweep_line": settings.show_sweep_line(),
             "traffic_mode": settings.traffic_mode(),
             "ais_enabled": settings.ais_enabled(),
@@ -531,6 +532,8 @@ def radar_save():
         settings.set_theme_index(int(data.get("theme_index")))
     if "show_compass_rose" in data:
         settings.set_show_compass_rose(bool(data.get("show_compass_rose")))
+    if "facing_deg" in data:
+        settings.set_facing_deg(data.get("facing_deg"))
     if "show_sweep_line" in data:
         settings.set_show_sweep_line(bool(data.get("show_sweep_line")))
     if "traffic_mode" in data:

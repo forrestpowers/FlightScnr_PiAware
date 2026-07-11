@@ -33,49 +33,53 @@ def tick_sweep():
     _sweep_angle = (_sweep_angle + 360.0 * dt / theme.SWEEP_PERIOD_MS) % 360.0
 
 
-def _draw_grid(surface):
+def _draw_grid(surface, *, calibrate: bool = False):
     center = (theme.CENTER_X, theme.CENTER_Y)
     line_w = max(1, theme.s(2))
+    facing = settings.effective_facing_deg()
     for ring in range(1, theme.RING_COUNT + 1):
         r = theme.GRID_OUTER_RADIUS * ring // theme.RING_COUNT
         draw.draw_dashed_circle(surface, center, r, theme.GRID, width=line_w)
 
     cx, cy = theme.CENTER_X, theme.CENTER_Y
     r = theme.GRID_OUTER_RADIUS
-    draw.draw_dashed_line(surface, (cx - r, cy), (cx + r, cy), theme.CROSSHAIR, width=line_w)
-    draw.draw_dashed_line(surface, (cx, cy - r), (cx, cy + r), theme.CROSSHAIR, width=line_w)
+    # Crosshairs follow true N/S and E/W (rotate with facing).
+    for bearing in (0, 90):
+        rad = math.radians(bearing - facing - 90)
+        dx = r * math.cos(rad)
+        dy = r * math.sin(rad)
+        draw.draw_dashed_line(
+            surface,
+            (cx - dx, cy - dy),
+            (cx + dx, cy + dy),
+            theme.CROSSHAIR,
+            width=line_w,
+        )
 
     if settings.show_compass_rose():
         font = draw.load_font(theme.FONT_CARDINAL, bold=True)
-        north_y = theme.CENTER_Y - theme.VISIBLE_RADIUS + theme.CARDINAL_NORTH_OFFSET_Y
-        south_y = theme.CENTER_Y + theme.VISIBLE_RADIUS - theme.CARDINAL_SOUTH_OFFSET_Y - font.get_height()
-        west_x = theme.CENTER_X - theme.VISIBLE_RADIUS + theme.s(10)
-        east_x = theme.CENTER_X + theme.VISIBLE_RADIUS - theme.s(10) - font.size("E")[0]
-        labels = [
-            ("N", theme.CENTER_X, north_y),
-            ("S", theme.CENTER_X, south_y),
-            ("W", west_x, theme.CENTER_Y - font.get_height() // 2),
-            ("E", east_x, theme.CENTER_Y - font.get_height() // 2),
-        ]
-        for text, x, y in labels:
+        # Place cardinals on the visible rim so they track true north.
+        card_r = theme.VISIBLE_RADIUS - theme.CARDINAL_NORTH_OFFSET_Y
+        for text, bearing in (("N", 0), ("E", 90), ("S", 180), ("W", 270)):
+            rad = math.radians(bearing - facing - 90)
+            x = cx + int(card_r * math.cos(rad))
+            y = cy + int(card_r * math.sin(rad))
             rendered = font.render(text, True, theme.GRID)
-            if text in ("N", "S"):
-                rect = rendered.get_rect(midtop=(x, y))
-            elif text == "W":
-                rect = rendered.get_rect(midleft=(x, y))
-            else:
-                rect = rendered.get_rect(topleft=(x, y))
-            surface.blit(rendered, rect)
+            surface.blit(rendered, rendered.get_rect(center=(x, y)))
 
         diag_r = theme.GRID_OUTER_RADIUS - theme.CARDINAL_DIAGONAL_INSET
         diag_font = draw.load_font(theme.FONT_CARDINAL_DIAG, bold=True)
         for label, angle in (("NE", 45), ("SE", 135), ("SW", 225), ("NW", 315)):
-            rad = math.radians(angle - 90)
+            rad = math.radians(angle - facing - 90)
             x = theme.CENTER_X + int(diag_r * math.cos(rad))
             y = theme.CENTER_Y + int(diag_r * math.sin(rad))
             rendered = diag_font.render(label, True, theme.GRID)
             rect = rendered.get_rect(center=(x, y))
             surface.blit(rendered, rect)
+
+    # Range tags collide with calibrate help text — omit them in that mode.
+    if calibrate:
+        return
 
     use_units = settings.distance_units()
     scale_font = draw.load_font(theme.FONT_DETAIL)
@@ -86,7 +90,7 @@ def _draw_grid(surface):
         r = theme.GRID_OUTER_RADIUS * ring // theme.RING_COUNT
         gap = theme.SCALE_GAP_OUTER_RING_KM if ring == theme.RING_COUNT and use_units == "km" else theme.SCALE_GAP_FROM_OUTER_RING
         label_r = r - gap
-        rad = math.radians(theme.SCALE_LABEL_BEARING_DEG - 90)
+        rad = math.radians(theme.SCALE_LABEL_BEARING_DEG - facing - 90)
         x = theme.CENTER_X + int(label_r * math.cos(rad))
         y = theme.CENTER_Y + int(label_r * math.sin(rad))
         rendered = scale_font.render(label, True, theme.GRID)
@@ -275,7 +279,6 @@ def _draw_flights(surface, flights):
         lon = flight.get("plane_longitude")
         if lat is None or lon is None:
             continue
-        heading = flight.get("heading") or 0
         _, _, dist_km = geo.local_offset_km(lat, lon)
         if dist_km <= geo.inner_ring_max_km():
             x, y = geo.lat_lon_to_screen(lat, lon)
@@ -299,14 +302,14 @@ def _draw_flights(surface, flights):
             surface,
             x,
             y,
-            flight.get("heading") or 0,
+            geo.screen_heading(flight.get("heading") or 0),
             _flight_icon_color(flight, compact=True),
             compact=True,
             flight=flight,
         )
 
     for _, flight, (x, y) in inner_items:
-        heading = flight.get("heading") or 0
+        heading = geo.screen_heading(flight.get("heading") or 0)
         color = _flight_icon_color(flight, compact=False)
         aircraft.draw_plane_icon(surface, x, y, heading, color, flight=flight)
         _draw_aircraft_tag(surface, x, y, flight)
@@ -370,18 +373,69 @@ def _draw_status(surface, flights):
         y = draw.draw_center_line(surface, line, y, font, color)
 
 
-def draw_radar(surface, flights, full_redraw=True):
+def draw_radar(surface, flights, full_redraw=True, *, calibrate: bool = False):
     alert_prefs.reload()
     draw.fill_background(surface)
     map_bg.request_background()
     map_bg.draw_background(surface)
-    _draw_grid(surface)
+    _draw_grid(surface, calibrate=calibrate)
 
-    _draw_flights(surface, flights)
-    if settings.show_sweep_line():
-        draw.draw_sweep_line(surface, _sweep_angle, theme.SWEEP, width=max(2, theme.s(2)))
-    _draw_status(surface, flights)
-    _draw_map_attribution(surface)
+    if not calibrate:
+        _draw_flights(surface, flights)
+        if settings.show_sweep_line():
+            sweep = (_sweep_angle - settings.effective_facing_deg()) % 360.0
+            draw.draw_sweep_line(surface, sweep, theme.SWEEP, width=max(2, theme.s(2)))
+        _draw_status(surface, flights)
+        _draw_map_attribution(surface)
+    else:
+        _draw_facing_calibrate_overlay(surface)
+
+
+def _draw_facing_calibrate_overlay(surface):
+    """Facing readout + tips on a dark panel so they stay readable over the grid."""
+    title = draw.load_font(theme.s(14), bold=True)
+    font = draw.load_font(theme.s(11))
+    facing = settings.effective_facing_deg()
+    label = settings.facing_label(facing)
+    lines = [
+        (f"Facing {label}", title, theme.LABEL),
+        ("Drag to rotate", font, theme.HINT),
+        ("Tap center to save", font, theme.MUTED),
+        ("Tap rim to cancel", font, theme.MUTED),
+    ]
+
+    pad_x = theme.s(8)
+    pad_y = theme.s(6)
+    gap = theme.s(1)
+    rendered = [(font_obj.render(text, True, color), font_obj) for text, font_obj, color in lines]
+    text_w = max(r.get_width() for r, _ in rendered)
+    text_h = sum(r.get_height() for r, _ in rendered) + gap * (len(rendered) - 1)
+    panel_w = text_w + pad_x * 2
+    panel_h = text_h + pad_y * 2
+
+    # Sit just below center so the hub stays clear for the save tap target.
+    panel_rect = pygame.Rect(0, 0, panel_w, panel_h)
+    panel_rect.centerx = theme.CENTER_X
+    panel_rect.top = theme.CENTER_Y + theme.s(14)
+
+    panel = pygame.Surface((panel_w, panel_h), pygame.SRCALPHA)
+    panel.fill((0, 0, 0, 200))
+    pygame.draw.rect(panel, (*theme.GRID[:3], 90), panel.get_rect(), max(1, theme.s(1)))
+    surface.blit(panel, panel_rect.topleft)
+
+    y = panel_rect.top + pad_y
+    for surf, _font in rendered:
+        surface.blit(surf, surf.get_rect(midtop=(theme.CENTER_X, y)))
+        y += surf.get_height() + gap
+
+    # Small center marker so the save tap zone is obvious.
+    pygame.draw.circle(
+        surface,
+        theme.LABEL,
+        (theme.CENTER_X, theme.CENTER_Y),
+        max(3, theme.s(4)),
+        max(1, theme.s(2)),
+    )
 
 
 def _draw_map_attribution(surface):
