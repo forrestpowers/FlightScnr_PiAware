@@ -34,6 +34,8 @@ _DEFAULT_CATEGORY = "large-jet-2"
 # Helicopter artwork has more padding in the source PNG; boost draw size only.
 _CATEGORY_SIZE_SCALE = {
     "helicopter": 1.85,
+    "drone": 0.5,
+    "military-drone": 0.5,
 }
 
 _type_to_category: dict[str, str] | None = None
@@ -132,17 +134,19 @@ def icon_category(flight: dict | None) -> str:
         return "helicopter"
 
     mapped = _category_for_type(plane_type)
+    # Explicit ICAO mapping wins (e.g. TEX2 → small-prop-single) even when
+    # dbFlags marks the track military; only unmapped types use the heuristic.
+    if mapped:
+        return mapped
 
     try:
         from utilities import aircraft_alert
 
         if aircraft_alert.is_military(flight):
-            return _military_category(plane_type, mapped)
+            return _military_category(plane_type, None)
     except ImportError:
         pass
 
-    if mapped:
-        return mapped
     return _DEFAULT_CATEGORY
 
 

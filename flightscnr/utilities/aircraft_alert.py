@@ -1,6 +1,8 @@
 """Aircraft alert detection — military, emergency squawk, watch list."""
 
+import json
 import logging
+import os
 import time
 
 from display.round_touch import alert_prefs, geo
@@ -12,6 +14,38 @@ _SEEN_CAPACITY = 32
 _seen_hashes: list[int] = []
 _last_beep_ts = 0.0
 _BEEP_COOLDOWN_S = 2.0
+
+# ICAO types listed under military-* icon categories (e.g. Q9 → military-drone).
+_ICON_MAPPING_PATH = os.path.join(
+    os.path.dirname(os.path.abspath(__file__)),
+    "..",
+    "assets",
+    "aircraft",
+    "icons",
+    "aircraft-icons.json",
+)
+_military_type_codes: frozenset[str] | None = None
+
+
+def _military_type_codes_from_icons() -> frozenset[str]:
+    global _military_type_codes
+    if _military_type_codes is not None:
+        return _military_type_codes
+    codes: set[str] = set()
+    try:
+        with open(_ICON_MAPPING_PATH, encoding="utf-8") as fh:
+            data = json.load(fh)
+        for category, types in (data.get("typeCodeMapping") or {}).items():
+            if not str(category).startswith("military-"):
+                continue
+            for code in types or []:
+                key = "".join(str(code).upper().split())
+                if key:
+                    codes.add(key)
+    except (OSError, json.JSONDecodeError, TypeError) as exc:
+        logger.warning("Could not load military type codes from icons: %s", exc)
+    _military_type_codes = frozenset(codes)
+    return _military_type_codes
 
 
 def _hash_callsign(callsign: str) -> int:
@@ -152,7 +186,10 @@ def is_military(flight: dict) -> bool:
         flags = int(raw or 0)
     except (TypeError, ValueError):
         flags = 0
-    return bool(flags & 0x01)
+    if flags & 0x01:
+        return True
+    plane = "".join(str(flight.get("plane") or "").upper().split())
+    return bool(plane) and plane in _military_type_codes_from_icons()
 
 
 def is_emergency_squawk(flight: dict) -> bool:
