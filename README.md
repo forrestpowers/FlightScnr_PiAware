@@ -1,14 +1,16 @@
 # FlightScnr Pi
 
-A [round **4in touch display](https://www.waveshare.com/4inch-dsi-lcd-c.htm?&aff_id=108718)** flight tracker for Raspberry Pi. The on-device UI is modeled after my other project, [FlightScnr](https://github.com/yashmulgaonkar/FlightScnr): dark radar aesthetic, animated sweep, map tiles, and gesture navigation. A built-in **web portal** configures everything from your phone or laptop on the same network.
+A [round **4in touch display**](https://www.waveshare.com/4inch-dsi-lcd-c.htm?&aff_id=108718) flight tracker for Raspberry Pi. The on-device UI is modeled after my other project, [FlightScnr](https://github.com/yashmulgaonkar/FlightScnr): dark radar aesthetic, animated sweep, map tiles, and gesture navigation. A built-in **web portal** configures everything from your phone or laptop on the same network.
 
-FlightScnr Pi on a round display
+![FlightScnr Pi on a round display](docs/images/flightscnrpi.jpg)
 
-
+<p align="center">
+  <a href="https://buymeacoffee.com/yashmulgaonkar" target="_blank">
+    <img src="https://cdn.buymeacoffee.com/buttons/v2/default-yellow.png" alt="Buy Me a Coffee" style="height: 35px;">
+  </a>
+</p>
 
 ---
-
-
 
 ## What it does
 
@@ -41,11 +43,11 @@ The UI is designed for a **4in round LCD with touch** (default layout: **720x720
 - **Auto-return** to clock when no aircraft are visible (optional, portal setting)
 - **Off-hours** schedule can dim the panel, turn it off, or force the clock screen at night
 
-Radar screen
+![Radar screen](docs/images/flightscnrpi.jpg)
 
-Flight detail · Tracked flight
+![Flight detail](docs/images/flight-detail.jpg) · ![Tracked flight](docs/images/tracked.jpg)
 
-Clock and forecast · Forecast
+![Clock and forecast](docs/images/clock.jpg) · ![Forecast](docs/images/forecast.jpg)
 
 #### Radar features
 
@@ -124,7 +126,7 @@ API responses are **cached** (e.g. FR24 feed ~90s, flight details ~30 min, weath
 
 ## Hardware
 
-Hardware assembly
+![Hardware assembly](docs/images/assembly.jpg)
 
 ### Bill of materials
 
