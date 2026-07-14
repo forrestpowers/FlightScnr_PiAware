@@ -14,7 +14,7 @@ A [round **4in touch display**](https://www.waveshare.com/4inch-dsi-lcd-c.htm?&a
 
 ## What it does
 
-FlightScnr Pi shows live aircraft around your pre set location on a circular radar, with rich flight details when you tap a plane. It combines **FlightRadar24 (FR24)**, live positions from **[adsb.fi](https://adsb.fi)** (free cloud feed — no local ADS-B dongle), **Tomorrow.io weather**, and optional **AirLabs** schedule data. Settings, API keys, tracking, and updates are managed through a local web portal. No SSH required for day-to-day use.
+FlightScnr Pi shows live aircraft around your pre set location on a circular radar, with rich flight details when you tap a plane. It combines **FlightAware AeroAPI**, live positions from **[adsb.fi](https://adsb.fi)** (free cloud feed — no local ADS-B dongle), **Tomorrow.io weather**, and optional **AirLabs** schedule data. Settings, API keys, tracking, and updates are managed through a local web portal. No SSH required for day-to-day use.
 
 ### Round touch display
 
@@ -115,7 +115,7 @@ Open from any device on your LAN:
 | **Weather**           | °C / °F for clock and forecast                                                                           |
 | **Alerts**            | Military, emergency squawk, watch list, hide non-alerted aircraft                                        |
 | **Tracking**          | Track a callsign; **route search** (origin + destination) for live flights                               |
-| **API keys**          | FR24, Tomorrow.io, AirLabs, aisstream.io - save or save & restart                                        |
+| **API keys**          | AeroAPI keys and cost ceiling, Tomorrow.io, AirLabs, aisstream.io - save or save & restart                |
 | **Updates**           | Check GitHub for new releases; **Update Now** runs `git pull` and re-syncs (git checkout required)       |
 | **System**            | **Reboot** or **Shutdown** the Pi remotely                                                               |
 
@@ -141,18 +141,22 @@ Portal preferences are stored on the Pi in `/var/lib/flightscnr/` and apply with
 ### Data sources and modes
 
 
-| Source                                                                 | Required?                | Provides                                                                                                                                          |
-| ---------------------------------------------------------------------- | ------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **[FR24 API](https://fr24api.flightradar24.com/docs/getting-started)** | Yes (full app)           | Routes, airlines, flight details, tracked flights, enriched radar                                                                                 |
-| **[adsb.fi](https://adsb.fi)**                                         | Optional (on by default) | Free live positions over the internet — merges with FR24 or fills the radar when FR24 is off (`ADSB_ENABLED=True`). **Not** a USB ADS-B receiver. |
-| **[aisstream.io](https://aisstream.io/)**                              | Optional                 | Live marine AIS vessel positions on the radar (set traffic mode to marine or both)                                                                  |
-| **[planespotters.net](https://www.planespotters.net/)**                | Optional (automatic)     | Aircraft photos on flight detail (by hex / registration)                                                                                            |
-| **[Wikimedia Commons](https://commons.wikimedia.org/)**                | Optional (automatic)     | Vessel photos on marine detail; aircraft type photo fallback                                                                                        |
-| **[Tomorrow.io](https://app.tomorrow.io/signup)**                      | Yes (weather)            | Clock temperature and multi-day forecast                                                                                                          |
-| **[AirLabs](https://airlabs.co/signup)**                               | Optional                 | Scheduled departure info when a tracked flight is not yet airborne                                                                                |
+| Source                                                                                         | Required?                | Provides                                                                                                                                            |
+| ---------------------------------------------------------------------------------------------- | ------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **[FlightAware AeroAPI](https://www.flightaware.com/commercial/aeroapi/)**                     | Yes (full app)           | Cached routes, schedules, flight details, explicit route searches, and global tracked-flight positions                                               |
+| **[adsb.fi](https://adsb.fi)**                                                                 | Optional (on by default) | Free live nearby positions over the internet; the radar still works without an AeroAPI key. **Not** a USB ADS-B receiver.                            |
+| **[aisstream.io](https://aisstream.io/)**                                                      | Optional                 | Live marine AIS vessel positions on the radar (set traffic mode to marine or both)                                                                  |
+| **[planespotters.net](https://www.planespotters.net/)**                                        | Optional (automatic)     | Aircraft photos on flight detail (by hex / registration)                                                                                            |
+| **[Wikimedia Commons](https://commons.wikimedia.org/)**                                        | Optional (automatic)     | Vessel photos on marine detail; aircraft type photo fallback                                                                                        |
+| **[Tomorrow.io](https://app.tomorrow.io/signup)**                                              | Yes (weather)            | Clock temperature and multi-day forecast                                                                                                            |
+| **[AirLabs](https://airlabs.co/signup)**                                                       | Optional                 | Scheduled departure info when a tracked flight is not yet airborne                                                                                  |
 
 
-API responses are **cached** (e.g. FR24 feed ~90s, flight details ~30 min, weather ~1 hr) to reduce quota use during 24/7 operation. Offline databases (`airports.json`, `airlines.json`, `icao_types.json`) download on first run.
+AeroAPI responses are cached for 30 minutes and collection endpoints are limited to one result page. The app also keeps a persistent estimated-cost ledger in `/var/lib/flightscnr/aeroapi_usage.json`. In the web portal's **API Keys** panel, choose the Personal preset (`$0.15/day`, about `$4.65` in a 31-day month), the ADS-B feeder preset (`$0.30/day`, about `$9.30`), or a custom daily ceiling. The portal selection applies immediately and overrides the install-time `AEROAPI_DAILY_BUDGET_USD` default. The app stops new paid requests when the ceiling is reached while the live adsb.fi radar continues to run. Pricing can change, so verify the current [per-query fees](https://www.flightaware.com/commercial/aeroapi/) before raising the limit.
+
+> **License note:** review the current [AeroAPI Personal License](https://www.flightaware.com/commercial/aeroapi/AeroAPI_Personal_License.pdf) for your use. It includes restrictions concerning AeroAPI data used with other real-time or near-real-time sources.
+
+Weather is cached for about one hour. Offline databases (`airports.json`, `airlines.json`, `icao_types.json`) download on first run.
 
 ---
 
@@ -261,7 +265,7 @@ This installs system packages, creates `flightscnr-venv/`, downloads UI assets (
 
 #### 6. Configure
 
-**Easiest:** open the web portal → **API Keys** → enter `FR24_API_KEY` and `TOMORROW_API_KEY` → **Save & restart**.
+**Easiest:** open the web portal → **API Keys** → enter `AEROAPI_KEY` and `TOMORROW_API_KEY` → **Save & restart**.
 
 **Or edit** `config.h` in the project folder:
 
@@ -270,7 +274,7 @@ nano ~/FlightScnr_Pi/config.h
 sudo systemctl restart flightscnr
 ```
 
-Without `FR24_API_KEY`, the app still runs using **adsb.fi only** (radar positions and basic tags — no routes or rich detail screens). Set `ADSB_ENABLED=True` and your home location. See `config.h.example` and `.env.example` for all options.
+Without `AEROAPI_KEY`, the app still runs using **adsb.fi only** (radar positions and basic tags — no routes or rich detail screens). Set `ADSB_ENABLED=True` and your home location. See `config.h.example` and `.env.example` for all options.
 
 ## Updates
 
@@ -315,4 +319,3 @@ The 3D-printed enclosure is **not** part of this firmware repository. Its digita
 > You shall not share, sub-license, sell, rent, host, transfer, or distribute in any way the digital or 3D printed versions of this object, nor any other derivative work of this object in its digital or physical format (including - but not limited to - remixes of this object, and hosting on other digital platforms). The objects may not be used without permission in any way whatsoever in which you charge money, or collect fees.
 
 Always read the full license on MakerWorld before downloading, printing, or sharing the enclosure design.
-

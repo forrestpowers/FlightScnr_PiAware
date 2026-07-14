@@ -2,10 +2,10 @@
 airlabs.py — Flight schedule lookup via AirLabs API.
 
 Used for:
-- Pinned pre-departure tracked flights (when FR24 has no live position yet)
+- Pinned pre-departure tracked flights (when AeroAPI has no live position yet)
 - Flight detail screen route enrichment when origin/destination are missing
 
-The FR24 gRPC feed covers airborne aircraft; AirLabs fills schedule gaps on demand.
+AeroAPI covers airborne aircraft; AirLabs fills schedule gaps on demand.
 
 Free tier: 1000 credits/month, 1 credit per /schedules call.
 API key set via AIRLABS_API_KEY env var or config.

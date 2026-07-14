@@ -74,7 +74,7 @@ def _normalize_callsign(value) -> str:
 
 
 def callsign_match_keys(callsign: str) -> frozenset[str]:
-    """Callsign aliases for matching FR24 entries to ADS-B (e.g. UA123 → UAL123)."""
+    """Callsign aliases for matching AeroAPI entries to ADS-B (e.g. UA123 → UAL123)."""
     cs = _normalize_callsign(callsign)
     if not cs:
         return frozenset()
@@ -106,7 +106,7 @@ def merge_live_fields(target: dict, source: dict, fields: tuple[str, ...]) -> No
 
 
 def dedupe_flights(flights: list[dict], *, threshold_km: float = 0.45) -> list[dict]:
-    """Collapse FR24 + ADS-B duplicates that share the same position."""
+    """Collapse AeroAPI + ADS-B duplicates that share the same position."""
 
     def richness(flight: dict) -> int:
         score = 0

@@ -376,8 +376,8 @@ class TestErrorHandlerFreeze:
         from utilities.overhead import Overhead
         o = Overhead()
 
-        # Mock the API to raise a ConnectionError
-        with patch.object(o._api, 'get_flights', side_effect=ConnectionError("Network down")):
+        # Fail at the first network-pipeline guard without depending on a provider method.
+        with patch('utilities.overhead.location_configured', side_effect=ConnectionError("Network down")):
             # Run _grab directly (not in a thread for testing)
             o._grab()
 
@@ -391,8 +391,7 @@ class TestErrorHandlerFreeze:
         from utilities.overhead import Overhead
         o = Overhead()
 
-        # Mock the API to raise a generic exception
-        with patch.object(o._api, 'get_flights', side_effect=RuntimeError("Unexpected!")):
+        with patch('utilities.overhead.location_configured', side_effect=RuntimeError("Unexpected!")):
             o._grab()
 
         assert o.new_data is True
@@ -461,7 +460,7 @@ class TestOrdinal:
 
 class TestZoneFeedEnrichment:
     def test_enrich_adsb_entry_from_live_feed(self):
-        from utilities.fr24_client import LiveFlight
+        from utilities.aeroapi_client import LiveFlight
         from utilities.overhead import (
             _enrich_entry_from_zone_feed,
             _index_zone_flights_by_callsign,
@@ -501,3 +500,90 @@ class TestZoneFeedEnrichment:
         assert entry["plane"] == "B38M"
         assert entry.get("owner_icao") == "AMX"
         assert entry.get("distance") is not None
+
+
+class TestAeroAPIPipeline:
+    def test_adsb_position_is_enriched_without_a_paid_position_call(self):
+        from utilities.aeroapi_client import LiveFlight
+        from utilities.overhead import Overhead
+
+        adsb_entry = {
+            "callsign": "UAL123",
+            "icao_hex": "A12345",
+            "airline": "",
+            "plane": "B738",
+            "origin": "",
+            "destination": "",
+            "plane_latitude": 51.56,
+            "plane_longitude": -0.18,
+            "altitude": 28000,
+            "ground_speed": 430,
+            "heading": 90,
+            "vertical_speed": 1200,
+            "squawk": "1234",
+            "db_flags": 0,
+            "data_source": "adsb_fi",
+        }
+        live = LiveFlight(
+            flight_id="fa-id",
+            latitude=adsb_entry["plane_latitude"],
+            longitude=adsb_entry["plane_longitude"],
+            altitude=adsb_entry["altitude"],
+            ground_speed=adsb_entry["ground_speed"],
+            heading=adsb_entry["heading"],
+            vertical_speed=0,
+            callsign="UAL123",
+            registration="N12345",
+            origin_airport_iata="LHR",
+            destination_airport_iata="ORD",
+            airline_icao="UAL",
+            airline_iata="UA",
+            aircraft_code="B738",
+            on_ground=False,
+            eta=0,
+        )
+
+        class FakeAPI:
+            configured = True
+            aeroapi_ok = True
+
+            def __init__(self):
+                self.entries = []
+
+            def find_by_callsign(self, callsign, *, position_entry=None):
+                self.entries.append(position_entry)
+                return live
+
+            def get_flight_details(self, flight):
+                return {
+                    "aircraft": {"model": {"code": "B738"}},
+                    "aircraft_info": {"registered_owners": "", "typecode": "B738"},
+                    "schedule_info": {"flight_number": "UA123"},
+                    "time": {"scheduled": {}, "real": {}, "estimated": {}},
+                    "flight_progress": {},
+                    "trail": [],
+                }
+
+        api = FakeAPI()
+        overhead = Overhead()
+        overhead._api = api
+
+        with (
+            patch(
+                "utilities.adsb_client.fetch_aircraft_entries",
+                return_value=[dict(adsb_entry)],
+            ),
+            patch("utilities.overhead._airport_coords", return_value={}),
+            patch("utilities.overhead.log_flight_data"),
+            patch("utilities.overhead.log_farthest_flight"),
+            patch("utilities.overhead.log_flight_count"),
+            patch("utilities.overhead._log_route_audit"),
+        ):
+            overhead._grab()
+
+        result = overhead.data
+        assert len(result) == 1
+        assert result[0]["origin"] == "LHR"
+        assert result[0]["destination"] == "ORD"
+        assert result[0]["vertical_speed"] == 1200
+        assert api.entries == [adsb_entry]

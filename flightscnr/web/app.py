@@ -17,10 +17,10 @@ from config import (
     reload_location_override,
     set_location_home,
 )
-from utilities.fr24_client import FR24Client
+from utilities.aeroapi_client import AeroAPIClient
 
-# Singleton FR24Client shared across all web requests (shares cache + rate limiter)
-_fr24_client = FR24Client()
+# Singleton shared across web requests (cache + persistent daily cost ceiling).
+_aeroapi_client = AeroAPIClient()
 
 # /web is the folder that this file lives in
 WEB_DIR = os.path.dirname(__file__)
@@ -108,9 +108,8 @@ def lookup_flight(callsign):
             callsign = icao_prefix + callsign[2:]
 
     try:
-        api = _fr24_client
+        api = _aeroapi_client
 
-        # Server-side callsign filter (searches FR24's full worldwide feed)
         match = api.find_by_callsign(callsign)
 
         if not match:
@@ -120,7 +119,15 @@ def lookup_flight(callsign):
         details = api.get_flight_details(match)
         match.set_flight_details(details)
 
-        airline = match.airline_name or ""
+        from utilities.airline_branding import marketing_brand_name
+        from utilities.airlines import get_airline_name
+
+        airline = (
+            match.airline_name
+            or marketing_brand_name(match.number)
+            or get_airline_name(match.airline_icao)
+            or ""
+        )
         origin = match.origin_airport_iata or "???"
         destination = match.destination_airport_iata or "???"
         number = match.number or callsign
@@ -250,7 +257,7 @@ def tracked_set():
 
 @app.post("/route/search")
 def route_search():
-    """Search for live flights by origin→destination using gRPC server-side filter."""
+    """Search one AeroAPI result page for live flights by origin→destination."""
     import re
     data = request.get_json(force=True)
     if not data:
@@ -262,7 +269,7 @@ def route_search():
     if not re.match(r'^[A-Z]{3,4}$', origin) or not re.match(r'^[A-Z]{3,4}$', destination):
         return jsonify({"flights": [], "error": "Airport codes must be 3-4 letters"}), 400
     try:
-        matches = _fr24_client.find_by_route(origin, destination)
+        matches = _aeroapi_client.find_by_route(origin, destination)
         results = []
         for m in matches[:50]:  # limit to 50 results
             results.append({
@@ -377,7 +384,9 @@ def alerts_save():
 def api_keys_json():
     from secrets_store import secrets_status
 
-    return jsonify(secrets_status())
+    status = secrets_status()
+    status["aeroapi_usage"] = _aeroapi_client.usage
+    return jsonify(status)
 
 
 @app.post("/api-keys")
@@ -385,7 +394,10 @@ def api_keys_save():
     from secrets_store import request_service_restart, save_secrets_from_portal, secrets_status
 
     data = request.get_json(silent=True) or {}
-    save_secrets_from_portal(data)
+    try:
+        save_secrets_from_portal(data)
+    except ValueError as exc:
+        return jsonify({"ok": False, "message": str(exc)}), 400
     restarted = False
     if data.get("restart"):
         restarted = request_service_restart()
@@ -393,10 +405,11 @@ def api_keys_save():
         "ok": True,
         "restarted": restarted,
         "keys": secrets_status(),
+        "aeroapi_usage": _aeroapi_client.usage,
         "message": (
             "API keys saved and app restarted."
             if restarted
-            else "API keys saved. Restart the app to apply on the display: sudo systemctl restart flightscnr"
+            else "Settings saved. The AeroAPI ceiling applies immediately; restart to apply changed API keys on the display."
         ),
     })
 

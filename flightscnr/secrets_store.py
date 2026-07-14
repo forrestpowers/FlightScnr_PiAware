@@ -25,7 +25,7 @@ DATA_DIR = os.environ.get("FLIGHTSCNR_DATA_DIR", "/var/lib/flightscnr")
 SECRETS_JSON_PATH = os.path.join(DATA_DIR, "secrets.json")
 
 MANAGED_KEYS = (
-    "FR24_API_KEY",
+    "AEROAPI_KEY",
     "TOMORROW_API_KEY",
     "AIRLABS_API_KEY",
     "AISSTREAM_API_KEY",
@@ -44,7 +44,7 @@ CONFIG_H_SETTINGS = MANAGED_KEYS + (
 )
 
 TOGGLE_KEYS = (
-    "USE_FR24_API",
+    "USE_AEROAPI",
     "USE_TOMORROW_WEATHER",
     "USE_AIRLABS_API",
     "USE_AISSTREAM_API",
@@ -106,7 +106,7 @@ def load_config_h() -> dict[str, str]:
         return {}
 
 
-def load_secrets_json() -> dict[str, str]:
+def _load_secrets_payload() -> dict:
     try:
         with open(SECRETS_JSON_PATH, encoding="utf-8") as fh:
             data = json.load(fh)
@@ -114,6 +114,11 @@ def load_secrets_json() -> dict[str, str]:
         return {}
     if not isinstance(data, dict):
         return {}
+    return data
+
+
+def load_secrets_json() -> dict[str, str]:
+    data = _load_secrets_payload()
     out: dict[str, str] = {}
     for key in MANAGED_KEYS:
         raw = data.get(key) or data.get(key.lower())
@@ -124,18 +129,12 @@ def load_secrets_json() -> dict[str, str]:
 
 def load_toggles() -> dict[str, bool]:
     defaults = {
-        "USE_FR24_API": True,
+        "USE_AEROAPI": True,
         "USE_TOMORROW_WEATHER": True,
         "USE_AIRLABS_API": True,
         "USE_AISSTREAM_API": True,
     }
-    try:
-        with open(SECRETS_JSON_PATH, encoding="utf-8") as fh:
-            data = json.load(fh)
-    except (OSError, json.JSONDecodeError, TypeError):
-        return defaults
-    if not isinstance(data, dict):
-        return defaults
+    data = _load_secrets_payload()
     out = dict(defaults)
     for key in TOGGLE_KEYS:
         out[key] = _to_bool(data.get(key), defaults[key])
@@ -145,7 +144,7 @@ def load_toggles() -> dict[str, bool]:
 def api_enabled(key_name: str) -> bool:
     toggles = load_toggles()
     mapping = {
-        "FR24_API_KEY": "USE_FR24_API",
+        "AEROAPI_KEY": "USE_AEROAPI",
         "TOMORROW_API_KEY": "USE_TOMORROW_WEATHER",
         "AIRLABS_API_KEY": "USE_AIRLABS_API",
         "AISSTREAM_API_KEY": "USE_AISSTREAM_API",
@@ -207,17 +206,17 @@ def secrets_status() -> dict:
     return status
 
 
-def save_secrets_from_portal(payload: dict) -> dict[str, str]:
+def save_secrets_from_portal(payload: dict) -> dict:
     """
     Save API keys from web portal. Empty string keeps the previous value
     unless clear_missing=True in payload.
     """
-    current = load_secrets_json()
+    current = _load_secrets_payload()
     clear = bool(payload.get("clear_missing"))
     updated: dict[str, str] = dict(current)
 
     field_map = {
-        "fr24_api_key": "FR24_API_KEY",
+        "aeroapi_key": "AEROAPI_KEY",
         "tomorrow_api_key": "TOMORROW_API_KEY",
         "airlabs_api_key": "AIRLABS_API_KEY",
         "aisstream_api_key": "AISSTREAM_API_KEY",
@@ -234,7 +233,7 @@ def save_secrets_from_portal(payload: dict) -> dict[str, str]:
             os.environ.pop(env_key, None)
 
     toggle_map = {
-        "use_fr24_api": "USE_FR24_API",
+        "use_aeroapi": "USE_AEROAPI",
         "use_tomorrow_weather": "USE_TOMORROW_WEATHER",
         "use_airlabs_api": "USE_AIRLABS_API",
         "use_aisstream_api": "USE_AISSTREAM_API",
@@ -242,6 +241,15 @@ def save_secrets_from_portal(payload: dict) -> dict[str, str]:
     for form_key, key in toggle_map.items():
         if form_key in payload:
             updated[key] = _to_bool(payload.get(form_key), True)
+
+    if "aeroapi_daily_budget_usd" in payload:
+        try:
+            budget = float(payload.get("aeroapi_daily_budget_usd"))
+        except (TypeError, ValueError) as exc:
+            raise ValueError("AeroAPI daily ceiling must be a dollar amount") from exc
+        if not 0.0 <= budget <= 100.0:
+            raise ValueError("AeroAPI daily ceiling must be between $0 and $100")
+        updated["AEROAPI_DAILY_BUDGET_USD"] = round(budget, 4)
 
     os.makedirs(DATA_DIR, exist_ok=True)
     tmp = SECRETS_JSON_PATH + ".tmp"
@@ -252,13 +260,6 @@ def save_secrets_from_portal(payload: dict) -> dict[str, str]:
     try:
         os.chmod(SECRETS_JSON_PATH, 0o600)
     except OSError:
-        pass
-    # Re-inject FR24 env for fr24 package if already imported
-    try:
-        from utilities import fr24_client
-
-        fr24_client._ensure_env_credentials()
-    except Exception:
         pass
     try:
         from utilities.ais_client import sync_ais_client
