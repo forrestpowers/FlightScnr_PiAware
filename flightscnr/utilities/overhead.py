@@ -15,8 +15,7 @@ from utilities.airline_branding import (
     marketing_brand_name,
     resolve_logo_icao,
 )
-from utilities.fr24_client import FR24Client, LiveFlight
-from httpx import ConnectError, TimeoutException
+from utilities.aeroapi_client import AeroAPIClient, LiveFlight
 
 logger = logging.getLogger(__name__)
 
@@ -49,7 +48,7 @@ except (ImportError, ModuleNotFoundError, NameError):
 try:
     from config import (
         ZONE_HOME, LOCATION_HOME, location_configured,
-        SEARCH_RADIUS_NM, ADSB_ENABLED, zone_from_radius_nm,
+        SEARCH_RADIUS_NM, ADSB_ENABLED,
     )
     ZONE_DEFAULT = ZONE_HOME
     LOCATION_DEFAULT = LOCATION_HOME
@@ -311,7 +310,7 @@ def _airline_name_lookup(icao_code):
 
 
 def _index_zone_flights_by_callsign(flights: list) -> dict[str, LiveFlight]:
-    """Map callsign aliases to the closest FR24 live-feed flight in the zone."""
+    """Map callsign aliases to the closest AeroAPI-enriched flight in the zone."""
     from utilities.aircraft_alert import callsign_match_keys
 
     index: dict[str, LiveFlight] = {}
@@ -334,7 +333,7 @@ def _lookup_zone_flight(index: dict[str, LiveFlight], callsign: str) -> LiveFlig
 
 
 def _enrich_entry_from_zone_feed(entry: dict, lf: LiveFlight, stats: dict | None = None) -> bool:
-    """Merge route/type/airline from FR24 live feed without a details API call."""
+    """Merge cached AeroAPI route/type/airline data into a live ADS-B entry."""
     enriched = False
     origin = (lf.origin_airport_iata or "").strip()
     destination = (lf.destination_airport_iata or "").strip()
@@ -415,7 +414,7 @@ def _evict_aircraft_cache():
 
 def _adsbdb_aircraft(registration):
     """Fetch aircraft owner info by registration from adsbdb (free, cached 1hr).
-    Used for GA flights (N-numbers) where FR24 has no airline name."""
+    Used for GA flights (N-numbers) where AeroAPI has no airline name."""
     cached = _aircraft_cache.get(registration)
     if cached and (time() - cached["ts"]) < _CACHE_TTL:
         return cached["data"]
@@ -646,7 +645,7 @@ def log_farthest_flight(entry: dict):
 
 class Overhead:
     def __init__(self):
-        self._api = FR24Client()
+        self._api = AeroAPIClient()
         self._lock = Lock()
         self._data = []           # overhead flights
         self._tracked_data = None # tracked flight or None
@@ -680,7 +679,7 @@ class Overhead:
             "┌─────────────────────────────────────────────────────────",
             f"│ 🛩️  Pipeline Cycle #{self._cycle_count}  ({elapsed:.0f}ms)",
             "├─────────────────────────────────────────────────────────",
-            f"│ FR24 API Status:       {'✓ OK' if self._api.fr24_ok else '✗ UNREACHABLE'}",
+            f"│ AeroAPI Status:        {'✓ OK' if self._api.aeroapi_ok else '✗ UNREACHABLE'}",
             f"│ Zone flights (raw):    {stats.get('zone_raw', 0)}",
             f"│ After altitude filter: {stats.get('zone_filtered', 0)} "
             f"(min={MIN_ALTITUDE}ft, max={MAX_ALTITUDE}ft)",
@@ -695,7 +694,7 @@ class Overhead:
             f"│ adsbdb GA lookups:     {stats.get('adsbdb_lookups', 0)}",
             f"│ adsb.fi aircraft:      {stats.get('adsb_added', 0)}",
             f"│ adsb.fi refreshed:     {stats.get('adsb_updated', 0)}",
-            f"│ FR24 feed enriched:    {stats.get('feed_enriched', 0)}",
+            f"│ AeroAPI enriched:      {stats.get('feed_enriched', 0)}",
             f"│ Below min height:     {stats.get('altitude_dropped', 0)}",
             f"│ Helicopter detected:   {stats.get('helicopters', 0)}",
         ]
@@ -721,7 +720,7 @@ class Overhead:
                 dest = fd.get("destination", "?")[:3]
                 route = f"{orig}→{dest}".ljust(13)
                 dist = f"{fd.get('distance', 0):.1f}".rjust(5)
-                src = fd.get("data_source", "fr24")[:10]
+                src = fd.get("data_source", "aeroapi")[:10]
                 lines.append(f"│ {i:>2}  {cs} {ac} {route} {dist}  {src}")
 
         lines.append("├─── Lifetime Stats ─────────────────────────────────────")
@@ -770,8 +769,9 @@ class Overhead:
         }
 
         try:
-            # --- STEP 1: Check zone for overhead flights ---
+            # --- STEP 1: Fetch free live positions, then selectively enrich ---
             zone_by_callsign: dict[str, LiveFlight] = {}
+            adsb_entries: list[dict] = []
             if not location_configured():
                 logger.error(
                     "Location not configured — set HOME_LAT/HOME_LON or zone corners "
@@ -780,17 +780,65 @@ class Overhead:
                 flights = []
             else:
                 from display.round_touch import scale, settings
-
                 search_radius_nm = scale.search_radius_nm(settings.scale_index())
-                search_zone = zone_from_radius_nm(search_radius_nm)
-                flights = self._api.get_flights(bounds=search_zone)
-            stats["zone_raw"] = len(flights)
+
+                if ADSB_ENABLED:
+                    from utilities.adsb_client import fetch_aircraft_entries
+
+                    adsb_entries = fetch_aircraft_entries(
+                        LOCATION_DEFAULT[0],
+                        LOCATION_DEFAULT[1],
+                        search_radius_nm,
+                        MIN_ALTITUDE,
+                    )
+
+                def _entry_distance(entry: dict) -> float:
+                    return haversine(
+                        entry.get("plane_latitude"),
+                        entry.get("plane_longitude"),
+                        LOCATION_DEFAULT[0],
+                        LOCATION_DEFAULT[1],
+                    )
+
+                candidates = sorted(adsb_entries, key=_entry_distance)
+                selected = candidates[:MAX_FLIGHT_LOOKUP]
+                tracked = load_tracked_callsign()
+                if tracked:
+                    from utilities.aircraft_alert import callsign_match_keys
+
+                    tracked_keys = callsign_match_keys(tracked)
+                    tracked_entry = next(
+                        (
+                            entry for entry in candidates
+                            if tracked_keys.intersection(
+                                callsign_match_keys(entry.get("callsign"))
+                            )
+                        ),
+                        None,
+                    )
+                    if tracked_entry is not None and tracked_entry not in selected:
+                        selected.append(tracked_entry)
+
+                flights = []
+                if self._api.configured:
+                    for entry in selected:
+                        callsign = (entry.get("callsign") or "").strip()
+                        if not callsign:
+                            continue
+                        match = self._api.find_by_callsign(
+                            callsign,
+                            position_entry=entry,
+                        )
+                        if match is not None:
+                            flights.append(match)
+
+            stats["zone_raw"] = len(adsb_entries)
             flights = [f for f in flights if MIN_ALTITUDE <= f.altitude < MAX_ALTITUDE]
-            stats["zone_filtered"] = len(flights)
+            stats["zone_filtered"] = len(adsb_entries)
             flights.sort(key=lambda f: distance_from_flight_to_home(f))
             zone_flights_all = flights
             zone_by_callsign = _index_zone_flights_by_callsign(zone_flights_all)
-            flights = zone_flights_all[:MAX_FLIGHT_LOOKUP]
+            flights = zone_flights_all
 
             for f in flights:
                 retries = RETRIES
@@ -814,7 +862,7 @@ class Overhead:
                         # Aircraft type from details, fallback to live feed
                         plane = self.safe_get(d, "aircraft", "model", "code", default="") or f.aircraft_code or ""
 
-                        # Airline name: try local database first, then FR24's registered_owners
+                        # Airline name: prefer the local database; AeroAPI supplies operator codes.
                         flight_number = self.safe_get(d, "schedule_info", "flight_number", default="")
                         airline_name = self.safe_get(d, "aircraft_info", "registered_owners", default="")
 
@@ -971,11 +1019,11 @@ class Overhead:
                             "origin": origin,
                             "destination": destination,
                             "distance": entry["distance"],
-                            "data_source": "fr24_grpc",
+                            "data_source": "aeroapi+adsb",
                         })
 
                         # Audit log
-                        _log_route_audit(callsign, plane, entry["distance"], "fr24_grpc", origin, destination)
+                        _log_route_audit(callsign, plane, entry["distance"], "aeroapi+adsb", origin, destination)
 
                         log_flight_data(entry)
                         log_farthest_flight(entry)
@@ -987,20 +1035,9 @@ class Overhead:
                         if retries == 0:
                             logger.warning(f"Failed to get details for {f.callsign}: {e}")
 
-            # --- STEP 1b: ADS-B live positions (adsb.fi — free, used by FlightScnr) ---
-            adsb_entries: list[dict] = []
+            # --- STEP 1b: Merge the high-frequency ADS-B positions ---
             by_callsign: dict[str, dict] = {}
-            if ADSB_ENABLED and location_configured():
-                from utilities.adsb_client import fetch_aircraft_entries
-                from display.round_touch import scale, settings
-
-                search_radius_nm = scale.search_radius_nm(settings.scale_index())
-                adsb_entries = fetch_aircraft_entries(
-                    LOCATION_DEFAULT[0],
-                    LOCATION_DEFAULT[1],
-                    search_radius_nm,
-                    MIN_ALTITUDE,
-                )
+            if adsb_entries:
                 _LIVE_FIELDS = (
                     "plane_latitude", "plane_longitude", "altitude",
                     "heading", "ground_speed", "vertical_speed",
@@ -1028,7 +1065,7 @@ class Overhead:
                         "origin": flight_dict.get("origin", ""),
                         "destination": flight_dict.get("destination", ""),
                         "distance": flight_dict.get("distance", 0),
-                        "data_source": "fr24_feed+adsb",
+                        "data_source": "aeroapi+adsb",
                     })
 
                 by_callsign.clear()
@@ -1097,7 +1134,10 @@ class Overhead:
                     self._tracked_last_data = None
                     self._tracked_schedule_cache.clear()
 
-                tracked_data = self._grab_tracked(tracked_callsign, zone_flights=flights)
+                tracked_data = self._grab_tracked(
+                    tracked_callsign,
+                    zone_flights=zone_flights_all,
+                )
 
                 if tracked_data:
                     # Flight found — reset miss counter, store latest ETA and data
@@ -1222,7 +1262,7 @@ class Overhead:
                 self._tracked_data = tracked_data
                 self._new_data = True
 
-        except (ConnectionError, ConnectError, TimeoutException, OSError) as e:
+        except (ConnectionError, requests.RequestException, OSError) as e:
             logger.warning(f"Overhead: Network error during _grab: {type(e).__name__}: {e}")
             with self._lock:
                 self._data = []
@@ -1257,7 +1297,7 @@ class Overhead:
     def _grab_tracked(self, flight_input, zone_flights=None):
         flight_input = flight_input.strip().upper()
 
-        # Convert IATA format (UA353, B6555) to ICAO (UAL353, JBU555) for gRPC filter
+        # Convert IATA format (UA353, B6555) to the preferred ICAO designator.
         if len(flight_input) >= 3 and flight_input[:2] in IATA_TO_ICAO and flight_input[2:3].isdigit():
             icao_prefix = IATA_TO_ICAO.get(flight_input[:2])
             if icao_prefix:
@@ -1266,8 +1306,15 @@ class Overhead:
         match = None
 
         try:
-            # Always fetch a fresh live position — the zone feed cache can be ~90s stale.
-            match = self._api.find_by_callsign(flight_input)
+            # Reuse the local ADS-B position when the tracked flight is nearby.
+            # Otherwise AeroAPI supplies the global position at its cached cadence.
+            if zone_flights:
+                match = _lookup_zone_flight(
+                    _index_zone_flights_by_callsign(zone_flights),
+                    flight_input,
+                )
+            if match is None:
+                match = self._api.find_by_callsign(flight_input)
 
             if not match:
                 return None
@@ -1349,7 +1396,7 @@ class Overhead:
             time_real_dep  = self.safe_get(time_details, "real", "departure")
             time_est_arr   = self.safe_get(time_details, "estimated", "arrival") or eta or None
 
-            # Airline name: try local database, then FR24
+            # Airline name: use local branding/airline data when available.
             airline_name = match.airline_name or ""
             if not airline_name:
                 airline_icao_code = match.airline_icao or ""

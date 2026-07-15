@@ -16,7 +16,7 @@ logger = logging.getLogger("flightscnr")
 def validate_config():
     """Check that required configuration is present and log status."""
     from config import (
-        FR24_API_KEY, TOMORROW_API_KEY,
+        AEROAPI_KEY, TOMORROW_API_KEY,
         ZONE_HOME, LOCATION_HOME, TEMPERATURE_LOCATION,
         location_configured, LOCATION_SOURCE, SEARCH_RADIUS_NM,
     )
@@ -28,13 +28,13 @@ def validate_config():
     errors = []
 
     # --- API Keys ---
-    if FR24_API_KEY:
-        masked = FR24_API_KEY[:8] + "..." + FR24_API_KEY[-4:]
-        logger.info(f"  ✓ FR24_API_KEY: {masked}")
+    if AEROAPI_KEY:
+        masked = AEROAPI_KEY[:4] + "..." + AEROAPI_KEY[-4:]
+        logger.info(f"  ✓ AEROAPI_KEY: {masked}")
     else:
-        errors.append("FR24_API_KEY")
+        errors.append("AEROAPI_KEY")
         logger.warning(
-            "  ⚠ FR24_API_KEY is NOT SET — adsb.fi-only mode "
+            "  ⚠ AEROAPI_KEY is NOT SET — adsb.fi-only mode "
             "(no routes, flight details, or tracked flights)"
         )
 

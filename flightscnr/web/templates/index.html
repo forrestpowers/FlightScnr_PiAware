@@ -257,15 +257,26 @@
     </details>
 
     <details class="card">
-        <summary><span class="ico">&#128273;</span>API Keys<span class="sum">FR24, Tomorrow.io, AirLabs, AIS</span><span class="chev">&#9656;</span></summary>
+        <summary><span class="ico">&#128273;</span>API Keys<span class="sum">AeroAPI, Tomorrow.io, AirLabs, AIS</span><span class="chev">&#9656;</span></summary>
         <div class="body">
             <div class="chk">
-                <label for="use-fr24-api">Use FR24 API</label>
-                <span class="switch"><input id="use-fr24-api" type="checkbox" checked><span class="track"></span></span>
+                <label for="use-aeroapi">Use FlightAware AeroAPI</label>
+                <span class="switch"><input id="use-aeroapi" type="checkbox" checked><span class="track"></span></span>
             </div>
-            <label for="fr24-key">FR24 key</label>
-            <input type="password" id="fr24-key" placeholder="subscription_key|token" autocomplete="off">
-            <p class="hint" id="fr24-hint"></p>
+            <label for="aeroapi-key">AeroAPI key</label>
+            <input type="password" id="aeroapi-key" placeholder="AeroAPI key" autocomplete="off">
+            <p class="hint" id="aeroapi-hint"></p>
+            <label for="aeroapi-budget-preset">AeroAPI cost ceiling</label>
+            <select id="aeroapi-budget-preset">
+                <option value="0.15">Personal credit — $0.15/day (about $4.65/month)</option>
+                <option value="0.30">ADS-B feeder credit — $0.30/day (about $9.30/month)</option>
+                <option value="custom">Custom daily ceiling</option>
+            </select>
+            <div class="hidden" id="aeroapi-budget-custom-row">
+                <label for="aeroapi-budget-custom">Custom daily ceiling (USD)</label>
+                <input type="number" id="aeroapi-budget-custom" min="0" max="100" step="0.01" value="0.30">
+            </div>
+            <p class="hint" id="aeroapi-usage">Paid lookups are cached and stop at the configured daily cost ceiling.</p>
             <div class="chk">
                 <label for="use-tomorrow-weather">Use Tomorrow.io weather</label>
                 <span class="switch"><input id="use-tomorrow-weather" type="checkbox" checked><span class="track"></span></span>
@@ -365,7 +376,7 @@ async function jsonFetch(url, opts = {}) {
 
 function applyKeyHints(keys) {
     const map = {
-        FR24_API_KEY: "fr24-hint",
+        AEROAPI_KEY: "aeroapi-hint",
         TOMORROW_API_KEY: "tomorrow-hint",
         AIRLABS_API_KEY: "airlabs-hint",
         AISSTREAM_API_KEY: "aisstream-hint",
@@ -374,6 +385,38 @@ function applyKeyHints(keys) {
         const info = keys[key] || {};
         $(id).textContent = info.configured ? `Current: ${info.masked} (${info.source})` : "Not set";
     });
+}
+
+function setAeroBudget(value) {
+    const budget = Math.max(0, Number(value) || 0);
+    const preset = Math.abs(budget - 0.15) < 0.0001
+        ? "0.15"
+        : (Math.abs(budget - 0.30) < 0.0001 ? "0.30" : "custom");
+    $("aeroapi-budget-preset").value = preset;
+    $("aeroapi-budget-custom").value = budget.toFixed(2);
+    $("aeroapi-budget-custom-row").classList.toggle("hidden", preset !== "custom");
+}
+
+function selectedAeroBudget() {
+    const preset = $("aeroapi-budget-preset").value;
+    return preset === "custom"
+        ? Number($("aeroapi-budget-custom").value)
+        : Number(preset);
+}
+
+function toggleAeroBudgetCustom() {
+    const custom = $("aeroapi-budget-preset").value === "custom";
+    $("aeroapi-budget-custom-row").classList.toggle("hidden", !custom);
+}
+
+function applyAeroUsage(usage) {
+    usage = usage || {};
+    if (!Number.isFinite(Number(usage.estimated_cost_usd))) return;
+    setAeroBudget(usage.daily_budget_usd);
+    $("aeroapi-usage").textContent =
+        `Estimated today: $${Number(usage.estimated_cost_usd).toFixed(3)} of ` +
+        `$${Number(usage.daily_budget_usd || 0).toFixed(3)} local ceiling ` +
+        `(${Number(usage.requests || 0)} paid requests).`;
 }
 
 function rangeValueToKm(value, units) {
@@ -596,8 +639,9 @@ async function loadAll() {
     try {
         const keys = await jsonFetch("/api-keys/json");
         applyKeyHints(keys);
+        applyAeroUsage(keys.aeroapi_usage);
         const toggles = keys.toggles || {};
-        $("use-fr24-api").checked = toggles.USE_FR24_API !== false;
+        $("use-aeroapi").checked = toggles.USE_AEROAPI !== false;
         $("use-tomorrow-weather").checked = toggles.USE_TOMORROW_WEATHER !== false;
         $("use-airlabs-api").checked = toggles.USE_AIRLABS_API !== false;
         $("use-aisstream-api").checked = toggles.USE_AISSTREAM_API !== false;
@@ -714,26 +758,32 @@ async function saveAlerts() {
 async function saveApiKeys(restart) {
     clearStatus("api-keys-status");
     try {
+        const aeroapiBudget = selectedAeroBudget();
+        if (!Number.isFinite(aeroapiBudget) || aeroapiBudget < 0 || aeroapiBudget > 100) {
+            throw new Error("Enter an AeroAPI daily ceiling between $0 and $100.");
+        }
         const data = await jsonFetch("/api-keys", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
-                fr24_api_key: $("fr24-key").value,
+                aeroapi_key: $("aeroapi-key").value,
                 tomorrow_api_key: $("tomorrow-key").value,
                 airlabs_api_key: $("airlabs-key").value,
                 aisstream_api_key: $("aisstream-key").value,
-                use_fr24_api: $("use-fr24-api").checked,
+                aeroapi_daily_budget_usd: aeroapiBudget,
+                use_aeroapi: $("use-aeroapi").checked,
                 use_tomorrow_weather: $("use-tomorrow-weather").checked,
                 use_airlabs_api: $("use-airlabs-api").checked,
                 use_aisstream_api: $("use-aisstream-api").checked,
                 restart: !!restart,
             }),
         });
-        $("fr24-key").value = "";
+        $("aeroapi-key").value = "";
         $("tomorrow-key").value = "";
         $("airlabs-key").value = "";
         $("aisstream-key").value = "";
         if (data.keys) applyKeyHints(data.keys);
+        if (data.aeroapi_usage) applyAeroUsage(data.aeroapi_usage);
         showStatus("api-keys-status", data.message || "API keys saved.");
     } catch (e) {
         showStatus("api-keys-status", e.message, true);
@@ -894,6 +944,7 @@ $("btn-route").addEventListener("click", searchRoute);
 $("btn-keys-save").addEventListener("click", () => saveApiKeys(false));
 $("btn-keys-restart").addEventListener("click", () => saveApiKeys(true));
 $("night_mode").addEventListener("change", toggleDimRow);
+$("aeroapi-budget-preset").addEventListener("change", toggleAeroBudgetCustom);
 $("dist_units").addEventListener("change", refreshRangeInput);
 $("range_value").addEventListener("blur", snapRangeInputPreview);
 

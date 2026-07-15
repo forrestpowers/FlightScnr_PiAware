@@ -91,7 +91,7 @@ def _resolve_location():
 
 
 # --- API Keys ---
-FR24_API_KEY = _require("FR24_API_KEY")
+AEROAPI_KEY = _require("AEROAPI_KEY")
 TOMORROW_API_KEY = _require("TOMORROW_API_KEY")
 AIRLABS_API_KEY = os.environ.get("AIRLABS_API_KEY", "")
 AISSTREAM_API_KEY = os.environ.get("AISSTREAM_API_KEY", "")

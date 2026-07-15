@@ -194,8 +194,8 @@ setup_venv() {
 
 verify_python_deps() {
     log_step "Verifying Python dependencies"
-    if "$VENV_DIR/bin/python" -c "import pygame, fr24, flask, httpx" >/dev/null 2>&1; then
-        log_ok "Core imports OK (pygame, fr24, flask, httpx)"
+    if "$VENV_DIR/bin/python" -c "import pygame, flask, requests" >/dev/null 2>&1; then
+        log_ok "Core imports OK (pygame, flask, requests)"
         return 0
     fi
     log_warn "Import check failed — service may not start; review pip output above"

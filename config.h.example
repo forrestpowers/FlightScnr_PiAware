@@ -13,8 +13,8 @@
 //
 // Lines starting with // are comments.
 
-// FlightRadar24 subscription (format: subscription_key|jwt_token)
-FR24_API_KEY =
+// FlightAware AeroAPI v4 key — https://www.flightaware.com/aeroapi/portal/
+AEROAPI_KEY =
 
 // Tomorrow.io weather — https://www.tomorrow.io/weather-api/
 TOMORROW_API_KEY =
