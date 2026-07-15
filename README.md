@@ -242,12 +242,12 @@ sudo reboot
 #### 4. Install FlightScnr Pi
 
 ```bash
-git clone https://github.com/yashmulgaonkar/FlightScnr_Pi.git ~/FlightScnr_Pi
-cd ~/FlightScnr_Pi
+git clone --branch main --single-branch https://github.com/forrestpowers/FlightScnr_PiAware.git ~/FlightScnr_PiAware
+cd ~/FlightScnr_PiAware
 sudo bash install-pi.sh
 ```
 
-This installs system packages, creates `flightscnr-venv/`, downloads UI assets (fonts, weather icons, aircraft icons), extracts airline logos from `logo.zip`, creates `config.h` from `config.h.example`, creates `/var/lib/flightscnr/`, writes `/etc/flightscnr.env`, and registers the `flightscnr` systemd service.
+These commands install the merged `main` branch from the `forrestpowers/FlightScnr_PiAware` fork. They also set that fork as the clone's `origin`, so future portal updates continue pulling this version. The installer installs system packages, creates `flightscnr-venv/`, downloads UI assets (fonts, weather icons, aircraft icons), extracts airline logos from `logo.zip`, creates `config.h` from `config.h.example`, creates `/var/lib/flightscnr/`, writes `/etc/flightscnr.env`, and registers the `flightscnr` systemd service.
 
 #### 5. Verify
 
@@ -270,7 +270,7 @@ This installs system packages, creates `flightscnr-venv/`, downloads UI assets (
 **Or edit** `config.h` in the project folder:
 
 ```bash
-nano ~/FlightScnr_Pi/config.h
+nano ~/FlightScnr_PiAware/config.h
 sudo systemctl restart flightscnr
 ```
 
